@@ -1,0 +1,276 @@
+{
+  "id": "38e33ae7-8da2-4a20-abcf-4c043c37224e",
+  "revision": 0,
+  "last_node_id": 21,
+  "last_link_id": 56,
+  "nodes": [
+    {
+      "id": 19,
+      "type": "MiDaS Model Loader",
+      "pos": [
+        886.65478515625,
+        1136.1702880859375
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "midas_model",
+          "type": "MIDAS_MODEL",
+          "links": [
+            48
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "was-node-suite-comfyui",
+        "ver": "1.0.2",
+        "Node name for S&R": "MiDaS Model Loader"
+      },
+      "widgets_values": [
+        "DPT_Large"
+      ]
+    },
+    {
+      "id": 9,
+      "type": "LoadImage",
+      "pos": [
+        160.24459838867188,
+        939.5037231445312
+      ],
+      "size": [
+        274.080078125,
+        314.00006103515625
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            29
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.41",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "AIWorkshopLogo.png",
+        "image"
+      ]
+    },
+    {
+      "id": 13,
+      "type": "ImageResizeKJv2",
+      "pos": [
+        572.8004150390625,
+        936.4774780273438
+      ],
+      "size": [
+        270,
+        242
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 29
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            50
+          ]
+        },
+        {
+          "name": "width",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "height",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-kjnodes",
+        "ver": "1.1.0",
+        "Node name for S&R": "ImageResizeKJv2"
+      },
+      "widgets_values": [
+        512,
+        512,
+        "nearest-exact",
+        "stretch",
+        "0, 0, 0",
+        "center",
+        2
+      ]
+    },
+    {
+      "id": 18,
+      "type": "MiDaS Depth Approximation",
+      "pos": [
+        1260.193115234375,
+        1065.024169921875
+      ],
+      "size": [
+        276.5337829589844,
+        126
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 50
+        },
+        {
+          "name": "midas_model",
+          "shape": 7,
+          "type": "MIDAS_MODEL",
+          "link": 48
+        }
+      ],
+      "outputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "links": [
+            52
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "was-node-suite-comfyui",
+        "ver": "1.0.2",
+        "Node name for S&R": "MiDaS Depth Approximation"
+      },
+      "widgets_values": [
+        "false",
+        "DPT_Large",
+        "false"
+      ]
+    },
+    {
+      "id": 20,
+      "type": "PreviewImage",
+      "pos": [
+        1664.3082275390625,
+        1072.2003173828125
+      ],
+      "size": [
+        210,
+        270.4658203125
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 52
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.3.41",
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": []
+    }
+  ],
+  "links": [
+    [
+      29,
+      9,
+      0,
+      13,
+      0,
+      "IMAGE"
+    ],
+    [
+      48,
+      19,
+      0,
+      18,
+      1,
+      "MIDAS_MODEL"
+    ],
+    [
+      50,
+      13,
+      0,
+      18,
+      0,
+      "IMAGE"
+    ],
+    [
+      52,
+      18,
+      0,
+      20,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "title": "MakeDepth",
+      "bounding": [
+        150,
+        850,
+        1734.0614013671875,
+        489.7884826660156
+      ],
+      "color": "#3f789e",
+      "font_size": 24,
+      "flags": {}
+    }
+  ],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.6388747195434575,
+      "offset": [
+        -111.73947733821996,
+        -339.2263377301414
+      ]
+    },
+    "frontendVersion": "1.25.11",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
+}

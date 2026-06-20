@@ -1,0 +1,19 @@
+{
+  "file": "Demo__Color_Grade_chain.png",
+  "created": 1781809662.3900146,
+  "kind": "shader",
+  "shader": "colorGrade",
+  "color": "Demo_me.png",
+  "depth": "Demo__Demo_me_depth.png",
+  "params": {
+    "uHue": 0.201,
+    "uSat": 1.81,
+    "uContrast": 0.83,
+    "uBright": 1.11,
+    "uUseDepthMask": false,
+    "uMaskLo": 0.28,
+    "uMaskHi": 0.8,
+    "uMaskInvert": false
+  },
+  "chain": true
+}

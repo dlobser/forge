@@ -1,0 +1,19 @@
+{
+  "file": "qri3__Color_Grade_chain_1.png",
+  "created": 1781828081.6201165,
+  "kind": "shader",
+  "shader": "colorGrade",
+  "color": "qri3__Distortion_chain_1.png",
+  "depth": null,
+  "params": {
+    "uHue": -0.261,
+    "uSat": 2,
+    "uContrast": 1.17,
+    "uBright": 1,
+    "uUseDepthMask": false,
+    "uMaskLo": 0.2,
+    "uMaskHi": 0.8,
+    "uMaskInvert": false
+  },
+  "chain": true
+}

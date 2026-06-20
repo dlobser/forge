@@ -1,0 +1,14 @@
+{
+  "file": "qri3__Blend.png",
+  "created": 1781842921.6000795,
+  "kind": "shader",
+  "shader": "blend",
+  "color": "qri3__AIWorkshop_txt2img_14.png",
+  "depth": "qri3__Kuramoto_Field.png",
+  "params": {
+    "uMode": 2,
+    "uMix": 0.48,
+    "uSwap": false
+  },
+  "outputSize": 1024
+}

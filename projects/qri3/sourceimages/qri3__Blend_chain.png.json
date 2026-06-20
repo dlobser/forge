@@ -1,0 +1,14 @@
+{
+  "file": "qri3__Blend_chain.png",
+  "created": 1781828038.7221966,
+  "kind": "shader",
+  "shader": "blend",
+  "color": "qri3__Erosion_chain.png",
+  "depth": "qri3__Erosion.png",
+  "params": {
+    "uMode": 2,
+    "uMix": 0.73,
+    "uSwap": false
+  },
+  "chain": true
+}

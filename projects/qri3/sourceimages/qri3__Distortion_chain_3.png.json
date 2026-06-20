@@ -1,0 +1,14 @@
+{
+  "file": "qri3__Distortion_chain_3.png",
+  "created": 1781883489.614694,
+  "kind": "shader",
+  "shader": "distortion",
+  "color": "qri3__AIWorkshop_txt2img_14.png",
+  "depth": "qri3__Erosion_1.png",
+  "params": {
+    "uStrength": 0.003,
+    "uSampleRadius": 1,
+    "uMode": 0
+  },
+  "chain": true
+}

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Forge</title>
+  <link rel="stylesheet" href="/web/css/styles.css" />
+</head>
+<body>
+  <!-- ── top bar ─────────────────────────────────────────────────────────── -->
+  <header id="topbar">
+    <div class="brand">FORGE</div>
+
+    <div class="project-bar">
+      <label>Project</label>
+      <select id="projectSelect" title="Open project"></select>
+      <button id="newProjectBtn" class="btn small" title="New project">＋</button>
+    </div>
+
+    <div class="import-bar">
+      <button id="importBtn" class="btn">Import image…</button>
+      <label class="chk" title="Center-crop & scale to a square on import">
+        <input type="checkbox" id="reformatChk" /> reformat
+      </label>
+      <select id="reformatSize" title="Square size when reformatting">
+        <option>512</option><option selected>1024</option>
+        <option>2048</option><option>4096</option>
+      </select>
+      <input type="file" id="importInput" accept="image/*" hidden />
+    </div>
+
+    <div class="spacer"></div>
+    <div id="comfyStatus" class="status" title="ComfyUI connection">
+      <span class="dot"></span><span class="label">comfy</span>
+    </div>
+    <button id="settingsBtn" class="btn small" title="Settings">⚙</button>
+  </header>
+
+  <!-- ── body ─────────────────────────────────────────────────────────────── -->
+  <div id="body">
+    <nav id="tabs">
+      <button class="tab active" data-tab="shaders">Shaders</button>
+      <button class="tab" data-tab="ai">AI</button>
+      <button class="tab" data-tab="chain">Chain</button>
+      <button class="tab" data-tab="gallery">Gallery</button>
+    </nav>
+
+    <main id="main">
+      <!-- list/array column (Shaders, AI, Chain) -->
+      <section id="listPanel" class="list-panel"></section>
+      <!-- display column -->
+      <section id="displayPanel" class="display-panel">
+        <canvas id="glcanvas"></canvas>
+        <img id="displayImage" class="display-image" hidden alt="" />
+        <div id="displayOverlay" class="display-overlay"></div>
+      </section>
+      <!-- gallery grid (Gallery tab) -->
+      <section id="galleryPanel" class="gallery-panel" hidden></section>
+    </main>
+  </div>
+
+  <!-- ── modals ───────────────────────────────────────────────────────────── -->
+  <div id="picker" class="modal" hidden>
+    <div class="modal-box">
+      <div class="modal-head"><span id="pickerTitle">Choose image</span>
+        <button class="btn small modal-close">✕</button></div>
+      <div id="pickerGrid" class="picker-grid"></div>
+    </div>
+  </div>
+
+  <div id="lightbox" class="modal" hidden>
+    <div class="lightbox-inner">
+      <button class="btn small modal-close lightbox-close">✕</button>
+      <img id="lightboxImg" alt="" />
+      <div id="lightboxCaption" class="lightbox-caption"></div>
+    </div>
+  </div>
+
+  <div id="settingsModal" class="modal" hidden>
+    <div class="modal-box">
+      <div class="modal-head"><span>Settings</span>
+        <button class="btn small modal-close">✕</button></div>
+      <div id="settingsBody" class="settings-body"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script type="module" src="/web/js/app.js"></script>
+</body>
+</html>

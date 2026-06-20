@@ -1,0 +1,146 @@
+{
+  "name": "qri4",
+  "shaderEffects": [
+    {
+      "id": "fx_z8li3ri",
+      "shader": "colorGrade",
+      "name": "Color Grade",
+      "color": "qri4_1200.jpg",
+      "depth": "qri4_1200.jpg",
+      "params": {
+        "uHue": -0.031,
+        "uSat": 1.17,
+        "uContrast": 1.56,
+        "uBright": 0.77,
+        "uUseDepthMask": false,
+        "uMaskLo": 0.2,
+        "uMaskHi": 0.8,
+        "uMaskInvert": false
+      },
+      "outputSize": 1024,
+      "animated": false,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    },
+    {
+      "id": "fx_u2qd099",
+      "shader": "distortion",
+      "name": "Distortion",
+      "color": "qri4_1200.jpg",
+      "depth": "qri4_1200.jpg",
+      "params": {
+        "uStrength": -0.011,
+        "uSampleRadius": 5,
+        "uMode": 0
+      },
+      "outputSize": 1024,
+      "animated": false,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    },
+    {
+      "id": "fx_20gy5wj",
+      "shader": "noise",
+      "name": "Noise",
+      "color": null,
+      "depth": "qri4_1200.jpg",
+      "params": {
+        "uScale": 6.6,
+        "uOctaves": 5,
+        "uLacunarity": 2,
+        "uGain": 0.5,
+        "uSpeed": 0.3,
+        "uContrast": 1,
+        "uRidged": false,
+        "uColorA": [
+          0,
+          0,
+          0
+        ],
+        "uColorB": [
+          1,
+          1,
+          1
+        ]
+      },
+      "outputSize": 1024,
+      "animated": true,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    },
+    {
+      "id": "fx_x1ty3la",
+      "shader": "kuramoto",
+      "name": "Kuramoto Field",
+      "color": "qri4_1200.jpg",
+      "depth": "qri4_1200.jpg",
+      "params": {
+        "uK": 1.2,
+        "uAlpha": 0,
+        "uDt": 0.085,
+        "uNoise": 0,
+        "uFreqA": 4,
+        "uCoupB": 0,
+        "uSeedA": true,
+        "uDisplayMode": 0
+      },
+      "outputSize": 1024,
+      "animated": true,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    },
+    {
+      "id": "fx_ofgl4fo",
+      "shader": "blend",
+      "name": "Blend",
+      "color": "qri4_1200.jpg",
+      "depth": "qri4_1200.jpg",
+      "params": {
+        "uMode": 3,
+        "uMix": 1,
+        "uSwap": false
+      },
+      "outputSize": 1024,
+      "animated": false,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    }
+  ],
+  "aiEffects": [],
+  "chain": [
+    {
+      "id": "st_kcpfkvd",
+      "ref": "fx_20gy5wj"
+    },
+    {
+      "id": "st_kwqw3s1",
+      "ref": "fx_z8li3ri",
+      "flow": "color"
+    },
+    {
+      "id": "st_stl9te8",
+      "ref": "fx_u2qd099",
+      "flow": "color"
+    },
+    {
+      "id": "st_hn923sw",
+      "ref": "fx_x1ty3la"
+    },
+    {
+      "id": "st_isgoc20",
+      "ref": "fx_ofgl4fo",
+      "flow": "depth"
+    },
+    {
+      "id": "st_4c3t8qr",
+      "ref": "fx_u2qd099",
+      "flow": "depth"
+    }
+  ],
+  "chainSource": "qri4_1200.jpg"
+}

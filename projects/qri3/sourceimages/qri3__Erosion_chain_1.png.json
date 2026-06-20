@@ -1,0 +1,22 @@
+{
+  "file": "qri3__Erosion_chain_1.png",
+  "created": 1781828081.871447,
+  "kind": "shader",
+  "shader": "erosion",
+  "color": "qri3__Color_Grade_chain_1.png",
+  "depth": "qri3__AIWorkshop_txt2img_14_depth.png",
+  "params": {
+    "uThreshold": 0.76,
+    "uSpread": 0.24,
+    "uSteps": 29,
+    "uFalloff": 1,
+    "uBands": 24,
+    "uInvert": false,
+    "uTint": [
+      1,
+      1,
+      1
+    ]
+  },
+  "chain": true
+}

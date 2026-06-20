@@ -1,0 +1,19 @@
+{
+  "file": "Demo__Depth_Edges_chain.png",
+  "created": 1781809662.4781458,
+  "kind": "shader",
+  "shader": "depthEdges",
+  "color": "Demo__Color_Grade_chain.png",
+  "depth": "Demo__Demo_me_depth.png",
+  "params": {
+    "uEdgeMix": 0.47,
+    "uEdgeScale": 9.2,
+    "uThreshold": 0.06,
+    "uEdgeColor": [
+      0.4666666666666667,
+      0.3607843137254902,
+      1
+    ]
+  },
+  "chain": true
+}

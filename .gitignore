@@ -1,0 +1,49 @@
+# ==========================================
+# Python & Virtual Environments
+# ==========================================
+venv/
+.venv/
+ENV/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# ==========================================
+# Environment / Secrets / OS
+# ==========================================
+.env
+.env.local
+.env.*.local
+$RECYCLE.BIN/
+Thumbs.db
+.DS_Store
+
+# ==========================================
+# Local Editor & AI Tooling Configurations
+# ==========================================
+# Ignore local workspace-specific settings, but keep the file tracked if it contains shared team settings.
+# Remove the line below if settings.json contains shared project configurations.
+.vscode/
+.idea/
+
+# Local agent/IDE runtime tracking
+.claude/
+.antigravity/
+
+# ==========================================
+# Build Artifacts / Web Dependencies
+# ==========================================
+# If your 'web' directory uses npm/yarn packages, ignore the dependencies
+web/node_modules/
+web/dist/
+web/build/
+
+# ==========================================
+# Local Batch Scripts / Executables (Optional)
+# ==========================================
+# If forge.bat or start.bat contain hardcoded local file paths or credentials, 
+# uncomment the lines below to ignore them and track templates instead (e.g., start.bat.example)
+# forge.bat
+# start.bat

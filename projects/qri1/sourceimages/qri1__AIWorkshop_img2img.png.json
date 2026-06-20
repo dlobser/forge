@@ -1,0 +1,20 @@
+{
+  "file": "qri1__AIWorkshop_img2img.png",
+  "created": 1781817127.9600778,
+  "kind": "ai",
+  "workflow": "AIWorkshop_img2img",
+  "values": {
+    "4:text": "",
+    "3:text": "extremely psychedelic trippy patterns with eyeballs",
+    "2:ckpt_name": "3dAnimationDiffusion_v10.safetensors",
+    "5:seed": 650888061691212,
+    "5:steps": 20,
+    "5:cfg": 8,
+    "5:sampler_name": "euler",
+    "5:scheduler": "normal",
+    "5:denoise": 0.5000000000000002
+  },
+  "images": {
+    "9:image": "qri1__Depth_Parallax.png"
+  }
+}

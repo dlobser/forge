@@ -1,0 +1,19 @@
+{
+  "file": "Demo__Color_Grade.png",
+  "created": 1781808782.5923831,
+  "kind": "shader",
+  "shader": "colorGrade",
+  "color": "Demo__Depth_Edges.png",
+  "depth": null,
+  "params": {
+    "uHue": 0,
+    "uSat": 1,
+    "uContrast": 1,
+    "uBright": 1,
+    "uUseDepthMask": false,
+    "uMaskLo": 0.2,
+    "uMaskHi": 0.8,
+    "uMaskInvert": false
+  },
+  "outputSize": 1024
+}

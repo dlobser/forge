@@ -1,0 +1,19 @@
+{
+  "file": "qri3__Depth_Edges.png",
+  "created": 1781843185.5212,
+  "kind": "shader",
+  "shader": "depthEdges",
+  "color": "qri3__Feedback_Deform.png",
+  "depth": "qri3__AIWorkshop_txt2img_14_depth_1.png",
+  "params": {
+    "uEdgeMix": 1,
+    "uEdgeScale": 5,
+    "uThreshold": 0.04,
+    "uEdgeColor": [
+      1,
+      1,
+      1
+    ]
+  },
+  "outputSize": 1024
+}

@@ -1,0 +1,237 @@
+{
+  "name": "qri3",
+  "shaderEffects": [
+    {
+      "id": "fx_giqir90",
+      "shader": "distortion",
+      "name": "Distortion",
+      "color": "qri3__AIWorkshop_txt2img_14.png",
+      "depth": "qri3__Erosion_1.png",
+      "params": {
+        "uStrength": 0.003,
+        "uSampleRadius": 1,
+        "uMode": 0
+      },
+      "outputSize": 1024,
+      "animated": false,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    },
+    {
+      "id": "fx_7ybix13",
+      "shader": "colorGrade",
+      "name": "Color Grade",
+      "color": "qri3__AIWorkshop_txt2img_14.png",
+      "depth": null,
+      "params": {
+        "uHue": -0.261,
+        "uSat": 2,
+        "uContrast": 1.17,
+        "uBright": 1,
+        "uUseDepthMask": false,
+        "uMaskLo": 0.2,
+        "uMaskHi": 0.8,
+        "uMaskInvert": false
+      },
+      "outputSize": 1024,
+      "animated": false,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    },
+    {
+      "id": "fx_i2ivn2x",
+      "shader": "erosion",
+      "name": "Erosion",
+      "color": "qri3__AIWorkshop_txt2img_14.png",
+      "depth": "qri3__AIWorkshop_txt2img_14_depth.png",
+      "params": {
+        "uThreshold": 0.76,
+        "uSpread": 0.24,
+        "uSteps": 29,
+        "uFalloff": 1,
+        "uBands": 24,
+        "uInvert": false,
+        "uTint": [
+          1,
+          1,
+          1
+        ]
+      },
+      "outputSize": 1024,
+      "animated": false,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    },
+    {
+      "id": "fx_bksx1nf",
+      "shader": "blend",
+      "name": "Blend",
+      "color": "qri3__AIWorkshop_txt2img_14.png",
+      "depth": "qri3__Kuramoto_Field.png",
+      "params": {
+        "uMode": 2,
+        "uMix": 0.48,
+        "uSwap": false
+      },
+      "outputSize": 1024,
+      "animated": false,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    },
+    {
+      "id": "fx_j2jd0c9",
+      "shader": "feedbackDeform",
+      "name": "Feedback Deform",
+      "color": "qri3__AIWorkshop_txt2img_14.png",
+      "depth": "qri3__AIWorkshop_txt2img_14_depth.png",
+      "params": {
+        "uStrength": 0.006,
+        "uIterations": 4,
+        "uFeedback": 1,
+        "uDecay": 1,
+        "uSwirl": -2.2,
+        "uSampleRadius": 8
+      },
+      "outputSize": 1024,
+      "animated": true,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    },
+    {
+      "id": "fx_dvt70br",
+      "shader": "kuramoto",
+      "name": "Kuramoto Field",
+      "color": "qri3__Kuramoto_Field_1.png",
+      "depth": "qri3__Kuramoto_Field_1.png",
+      "params": {
+        "uK": 10.4,
+        "uAlpha": 0,
+        "uDt": 0.19,
+        "uNoise": 0.28,
+        "uFreqA": 4,
+        "uCoupB": 0.38,
+        "uSeedA": true,
+        "uDisplayMode": 0
+      },
+      "outputSize": 1024,
+      "animated": true,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    },
+    {
+      "id": "fx_je512wd",
+      "shader": "depthEdges",
+      "name": "Depth Edges",
+      "color": "qri3__Feedback_Deform.png",
+      "depth": "qri3__AIWorkshop_txt2img_14_depth_1.png",
+      "params": {
+        "uEdgeMix": 1,
+        "uEdgeScale": 5,
+        "uThreshold": 0.04,
+        "uEdgeColor": [
+          1,
+          1,
+          1
+        ]
+      },
+      "outputSize": 1024,
+      "animated": false,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    },
+    {
+      "id": "fx_zl9i4kx",
+      "shader": "erosion",
+      "name": "Erosion",
+      "color": "qri3__Depth_Edges.png",
+      "depth": null,
+      "params": {
+        "uThreshold": 0.26,
+        "uSpread": 0.24,
+        "uSteps": 64,
+        "uFalloff": 1.82,
+        "uBands": 0,
+        "uInvert": false,
+        "uTint": [
+          1,
+          1,
+          1
+        ]
+      },
+      "outputSize": 1024,
+      "animated": false,
+      "fps": 24,
+      "frames": 48,
+      "simSize": 256
+    }
+  ],
+  "aiEffects": [
+    {
+      "id": "ai_dw6ajq5",
+      "workflow": "AIWorkshop_txt2img",
+      "name": "AIWorkshop_txt2img",
+      "values": {
+        "3:text": "A man sitting cross legged, from the front, close eyes, mannequin like, very simple, smooth shading, unreal render, blank background, iconic, front facing",
+        "4:text": "nude, naked",
+        "5:seed": 215024103909221,
+        "2:ckpt_name": "dreamshaper_8.safetensors"
+      },
+      "images": {},
+      "output": "qri3__AIWorkshop_txt2img_14.png"
+    },
+    {
+      "id": "ai_drh46qh",
+      "workflow": "AIWorkshop_controlNet",
+      "name": "AIWorkshop_controlNet",
+      "values": {
+        "4:text": "extremely detailed overlapping stripes and waves, abstract, psychedelic pattern",
+        "3:text": "extremely detailed overlapping stripes and waves, abstract, psychedelic pattern",
+        "5:seed": 402168875518204
+      },
+      "images": {
+        "9:image": "qri3__Erosion_1.png"
+      },
+      "output": "qri3__AIWorkshop_controlNet_3.png"
+    },
+    {
+      "id": "ai_nvcf9m3",
+      "workflow": "AIWorkshop_img2img",
+      "name": "AIWorkshop_img2img",
+      "values": {
+        "3:text": "extremely detailed overlapping stripes and waves, abstract, psychedelic pattern",
+        "4:text": "ugly",
+        "5:denoise": 0.4
+      },
+      "images": {
+        "9:image": "qri3__Blend.png"
+      },
+      "output": "qri3__AIWorkshop_img2img_1.png"
+    }
+  ],
+  "chain": [
+    {
+      "id": "st_801uqu",
+      "ref": "fx_giqir90"
+    },
+    {
+      "id": "st_xdpbz0",
+      "ref": "fx_7ybix13"
+    },
+    {
+      "id": "st_ojiagj",
+      "ref": "fx_i2ivn2x"
+    },
+    {
+      "id": "st_cb1kzv",
+      "ref": "fx_bksx1nf"
+    }
+  ],
+  "chainSource": "qri3__AIWorkshop_txt2img_14.png"
+}

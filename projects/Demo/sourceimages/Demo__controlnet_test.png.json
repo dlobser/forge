@@ -1,0 +1,10 @@
+{
+  "file": "Demo__controlnet_test.png",
+  "created": 1781817189.8918996,
+  "kind": "ai",
+  "workflow": "AIWorkshop_controlNet",
+  "values": {},
+  "images": {
+    "9:image": "Demo_me.png"
+  }
+}

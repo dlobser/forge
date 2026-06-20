@@ -1,0 +1,22 @@
+{
+  "file": "qri3__Erosion_1.png",
+  "created": 1781843224.9784963,
+  "kind": "shader",
+  "shader": "erosion",
+  "color": "qri3__Depth_Edges.png",
+  "depth": null,
+  "params": {
+    "uThreshold": 0.26,
+    "uSpread": 0.24,
+    "uSteps": 64,
+    "uFalloff": 1.82,
+    "uBands": 0,
+    "uInvert": false,
+    "uTint": [
+      1,
+      1,
+      1
+    ]
+  },
+  "outputSize": 1024
+}

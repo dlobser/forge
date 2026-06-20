@@ -1,0 +1,2132 @@
+{
+  "last_node_id": 39,
+  "last_link_id": 58,
+  "nodes": [
+    {
+      "id": 14,
+      "type": "forge/save",
+      "pos": [
+        2238.381473761944,
+        700.3239251759426
+      ],
+      "size": [
+        220,
+        90
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 23
+        }
+      ],
+      "properties": {
+        "name": "osc"
+      }
+    },
+    {
+      "id": 11,
+      "type": "forge/shader/kuramoto",
+      "pos": [
+        2023,
+        786
+      ],
+      "size": {
+        "0": 210,
+        "1": 410
+      },
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "Image A \u2192 freq",
+          "type": "IMAGE",
+          "link": 14
+        },
+        {
+          "name": "Image B \u2192 coupling",
+          "type": "IMAGE",
+          "link": 34
+        },
+        {
+          "name": "Coupling (K)",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Phase lag (\u03b1)",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Time step (dt)",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Freq spread",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Image A \u2192 freq",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Image B \u2192 coupling",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Seed phase from A",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            23,
+            36
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uK": 3.0735085082249194,
+          "uAlpha": 0.22881132276780639,
+          "uDt": 0.1273118362087676,
+          "uNoise": 0.08536367169115996,
+          "uFreqA": 1.233583181423617,
+          "uCoupB": 0.3749457953559032,
+          "uSeedA": true,
+          "uDisplayMode": 1
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 21,
+      "type": "forge/shader/blend",
+      "pos": [
+        2300,
+        908
+      ],
+      "size": {
+        "0": 210,
+        "1": 242
+      },
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 35
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 36
+        },
+        {
+          "name": "Mix",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Swap A/B",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            38
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uMode": 1,
+          "uMix": 1,
+          "uSwap": false
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 27,
+      "type": "forge/save",
+      "pos": [
+        4107.264187146996,
+        1164.2177049579998
+      ],
+      "size": [
+        220,
+        90
+      ],
+      "flags": {},
+      "order": 27,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 49
+        }
+      ],
+      "properties": {
+        "name": "graph"
+      }
+    },
+    {
+      "id": 24,
+      "type": "forge/sequence",
+      "pos": [
+        4120.264187146996,
+        971.2177049580002
+      ],
+      "size": [
+        220,
+        140
+      ],
+      "flags": {},
+      "order": 26,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 45
+        }
+      ],
+      "properties": {
+        "name": "graph_seq",
+        "fps": 24,
+        "frames": 48
+      }
+    },
+    {
+      "id": 28,
+      "type": "forge/viewer",
+      "pos": [
+        4121.413079676998,
+        1300.9774646519995
+      ],
+      "size": {
+        "0": 747.7977294921875,
+        "1": 853.9915161132812
+      },
+      "flags": {
+        "collapsed": false
+      },
+      "order": 28,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 50
+        }
+      ],
+      "properties": {}
+    },
+    {
+      "id": 23,
+      "type": "forge/shader/distortion",
+      "pos": [
+        3406.4130796769978,
+        1277.9774646519995
+      ],
+      "size": {
+        "0": 210,
+        "1": 221.0805206298828
+      },
+      "flags": {},
+      "order": 24,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 42
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 41
+        },
+        {
+          "name": "Strength",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Field Smoothing",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            44
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uStrength": 0.0011233171643668105,
+          "uSampleRadius": 2,
+          "uMode": 0
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 26,
+      "type": "forge/shader/distortion",
+      "pos": [
+        3409.4130796769978,
+        967.977464652
+      ],
+      "size": {
+        "0": 210,
+        "1": 221.0805206298828
+      },
+      "flags": {},
+      "order": 23,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 46
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 47
+        },
+        {
+          "name": "Strength",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Field Smoothing",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            48
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uStrength": 0.00011407011201602923,
+          "uSampleRadius": 2,
+          "uMode": 0
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 1,
+      "type": "forge/ai/AIWorkshop_txt2img",
+      "pos": [
+        187,
+        623
+      ],
+      "size": {
+        "0": 210,
+        "1": 486
+      },
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "values": {
+          "6:width": 512,
+          "6:height": 512,
+          "6:batch_size": 1,
+          "5:seed": 441476607186392,
+          "5:steps": 20,
+          "5:cfg": 8,
+          "5:sampler_name": "euler",
+          "5:scheduler": "normal",
+          "5:denoise": 1,
+          "2:ckpt_name": "3dAnimationDiffusion_v10.safetensors",
+          "4:text": "(character:1.3), person, (face:1.5), (eyes:1.5), human, animal, watermark, blurry, low resolution, low quality, compression artifacts",
+          "3:text": "a beautiful studio lit photograph, three points lighting, An (abstract:1.5) logo for a cool AI workshop, blobby text, liquid"
+        },
+        "output": "",
+        "randomizeSeed": true
+      }
+    },
+    {
+      "id": 9,
+      "type": "forge/shader/blend",
+      "pos": [
+        1687,
+        739
+      ],
+      "size": {
+        "0": 210,
+        "1": 242
+      },
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 12
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 13
+        },
+        {
+          "name": "Mix",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Swap A/B",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            14,
+            28
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uMode": 0,
+          "uMix": 0.6096447765115613,
+          "uSwap": true
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 12,
+      "type": "forge/shader/noise",
+      "pos": [
+        1749,
+        1321
+      ],
+      "size": {
+        "0": 210,
+        "1": 438
+      },
+      "flags": {
+        "collapsed": false
+      },
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "distort",
+          "type": "IMAGE",
+          "link": 15
+        },
+        {
+          "name": "Scale",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Octaves",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Lacunarity",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Gain",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Speed",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Scroll X",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Scroll Y",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Distort In",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Radial",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Distort Cx",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Distort Cy",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Contrast",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Ridged",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            29
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uScale": 5.828799509817472,
+          "uOctaves": 1.589464257812504,
+          "uLacunarity": 2.280722102864585,
+          "uGain": 0.5,
+          "uSpeed": 0.3,
+          "uDistortAmt": 1,
+          "uRadial": true,
+          "uContrast": 1.1911618381076403,
+          "uRidged": false,
+          "uColorA": [
+            0,
+            0,
+            0
+          ],
+          "uColorB": [
+            1,
+            1,
+            1
+          ]
+        },
+        "simSize": 256,
+        "animate": true
+      }
+    },
+    {
+      "id": 8,
+      "type": "forge/shader/blend",
+      "pos": [
+        1426,
+        742
+      ],
+      "size": {
+        "0": 210,
+        "1": 242
+      },
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 22
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 10
+        },
+        {
+          "name": "Mix",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Swap A/B",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            12
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uMode": 2,
+          "uMix": 0.3362711561414939,
+          "uSwap": false
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 7,
+      "type": "forge/shader/distortion",
+      "pos": [
+        1168,
+        769
+      ],
+      "size": {
+        "0": 210,
+        "1": 242
+      },
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 4
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 5
+        },
+        {
+          "name": "Strength",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Field Smoothing",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            10
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uStrength": 0.026059637484799336,
+          "uSampleRadius": 5.157564457524676,
+          "uMode": 0
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 6,
+      "type": "forge/ai/Depth",
+      "pos": [
+        863,
+        520
+      ],
+      "size": {
+        "0": 210,
+        "1": 174
+      },
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "Input image",
+          "type": "IMAGE",
+          "link": 3
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            5,
+            13,
+            22,
+            32
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "values": {},
+        "output": "qri-andres-silva__Depth_1.png",
+        "randomizeSeed": true
+      }
+    },
+    {
+      "id": 19,
+      "type": "forge/shader/colorGrade",
+      "pos": [
+        1614,
+        174
+      ],
+      "size": {
+        "0": 210,
+        "1": 362
+      },
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "Color",
+          "type": "IMAGE",
+          "link": 32
+        },
+        {
+          "name": "Mask",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "Hue Offset",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Saturation",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Contrast",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Brightness",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Tint Amt",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Use Mask",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Mask Low",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Mask High",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Invert Mask",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            34,
+            35
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uHue": 0,
+          "uSat": 1,
+          "uContrast": 2,
+          "uBright": 1.230694227430556,
+          "uUseDepthMask": false,
+          "uMaskLo": 0.2,
+          "uMaskHi": 0.8,
+          "uMaskInvert": false
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 2,
+      "type": "forge/import",
+      "pos": [
+        516,
+        776
+      ],
+      "size": {
+        "0": 237.16000366210938,
+        "1": 239.57998657226562
+      },
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            3,
+            4,
+            15,
+            31,
+            46,
+            51
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "file": "qri-andres-silva_qri6__AIWorkshop_txt2img_1.png",
+        "reformat": false,
+        "size": 1024
+      }
+    },
+    {
+      "id": 30,
+      "type": "forge/shader/sdf",
+      "pos": [
+        -175,
+        1268
+      ],
+      "size": {
+        "0": 210,
+        "1": 418
+      },
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "Center X",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Center Y",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Scale",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Dropoff",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Ring Radius",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Invert",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            52
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uShape": 0,
+          "uCenterX": 0.24422223069932694,
+          "uCenterY": 0.5,
+          "uScale": 0.4,
+          "uDropoff": 0.46262278238932286,
+          "uRing": 0.03420969645182292,
+          "uInvert": false
+        },
+        "simSize": 1024,
+        "animate": false
+      }
+    },
+    {
+      "id": 32,
+      "type": "forge/viewer",
+      "pos": [
+        334,
+        1297
+      ],
+      "size": [
+        328.52947203059875,
+        353.80096987910656
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 53
+        }
+      ],
+      "properties": {}
+    },
+    {
+      "id": 31,
+      "type": "forge/shader/sinwave",
+      "pos": [
+        75,
+        1277
+      ],
+      "size": [
+        210,
+        346.49939497518994
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 52
+        },
+        {
+          "name": "Frequency",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Speed",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Multiply",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Add",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            53
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uFreq": 37.70518246356101,
+          "uSpeed": 3.0893202266434248,
+          "uMult": 10,
+          "uAdd": -9
+        },
+        "simSize": 1024,
+        "animate": false
+      },
+      "shape": 4
+    },
+    {
+      "id": 18,
+      "type": "forge/shader/depthEdges",
+      "pos": [
+        2048,
+        1320
+      ],
+      "size": [
+        220.84808359374983,
+        326.42499609375
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 29
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 28
+        },
+        {
+          "name": "Edge / Color Mix",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Edge Strength",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Threshold",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            39
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uEdgeMix": 0.30123099483823557,
+          "uEdgeScale": 8.393165597426938,
+          "uThreshold": 0.04,
+          "uEdgeColor": [
+            1,
+            1,
+            1
+          ]
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 29,
+      "type": "forge/shader/colorGrade",
+      "pos": [
+        834,
+        919
+      ],
+      "size": {
+        "0": 210,
+        "1": 590
+      },
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "Color",
+          "type": "IMAGE",
+          "link": 51
+        },
+        {
+          "name": "Mask",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "Hue Offset",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Saturation",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Contrast",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Brightness",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Tint Amt",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Use Mask",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Mask Low",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Mask High",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Invert Mask",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uHue": 0,
+          "uSat": 1,
+          "uContrast": 1,
+          "uBright": 1,
+          "uTint": [
+            1,
+            1,
+            1
+          ],
+          "uTintAmt": 0,
+          "uUseDepthMask": false,
+          "uMaskLo": 0.2,
+          "uMaskHi": 0.8,
+          "uMaskInvert": false
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 33,
+      "type": "forge/shader/noise",
+      "pos": [
+        1095,
+        1797
+      ],
+      "size": {
+        "0": 210,
+        "1": 794
+      },
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "distort",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "Scale",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Octaves",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Lacunarity",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Gain",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Speed",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Scroll X",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Scroll Y",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Distort In",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Radial",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Distort Cx",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Distort Cy",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Contrast",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Ridged",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            56
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uScale": 3.365813237206218,
+          "uOctaves": 5,
+          "uLacunarity": 2,
+          "uGain": 0.5,
+          "uSpeed": 0.4845288209240809,
+          "uScrollX": 0,
+          "uScrollY": 0.19954432688030277,
+          "uDistortAmt": 0,
+          "uRadial": true,
+          "uCenterX": 0.5,
+          "uCenterY": 0.5,
+          "uContrast": 3,
+          "uRidged": false,
+          "uColorA": [
+            0,
+            0,
+            0
+          ],
+          "uColorB": [
+            1,
+            1,
+            1
+          ]
+        },
+        "simSize": 256,
+        "animate": true
+      }
+    },
+    {
+      "id": 34,
+      "type": "forge/shader/noise",
+      "pos": [
+        1423,
+        1758
+      ],
+      "size": {
+        "0": 210,
+        "1": 794
+      },
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "distort",
+          "type": "IMAGE",
+          "link": 56
+        },
+        {
+          "name": "Scale",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Octaves",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Lacunarity",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Gain",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Speed",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Scroll X",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Scroll Y",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Distort In",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Radial",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Distort Cx",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Distort Cy",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Contrast",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Ridged",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "params": {
+          "uScale": 10.089088528271203,
+          "uOctaves": 5.1377762171861985,
+          "uLacunarity": 2,
+          "uGain": 0.5,
+          "uSpeed": 0,
+          "uScrollX": 0,
+          "uScrollY": -0.36808117802187446,
+          "uDistortAmt": 0.3921948585594135,
+          "uRadial": true,
+          "uCenterX": 0.5186699316288507,
+          "uCenterY": 0.525569057440618,
+          "uContrast": 1.2199467080136324,
+          "uRidged": true,
+          "uColorA": [
+            0,
+            0,
+            0
+          ],
+          "uColorB": [
+            1,
+            1,
+            1
+          ]
+        },
+        "simSize": 256,
+        "animate": true
+      }
+    },
+    {
+      "id": 15,
+      "type": "forge/ai/img2img_depthControlNet",
+      "pos": [
+        3064,
+        1183
+      ],
+      "size": {
+        "0": 226.8000030517578,
+        "1": 618
+      },
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 40
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 31
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            42
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "values": {
+          "3:text": "beautiful flowing psychedelic waves of golden fractal energy",
+          "4:text": " watermark, blurry, low resolution, low quality, compression artifacts",
+          "5:seed": 938202191799962,
+          "5:steps": 20,
+          "5:cfg": 8,
+          "5:sampler_name": "euler",
+          "5:scheduler": "normal",
+          "5:denoise": 0.9,
+          "17:strength": 1,
+          "17:start_percent": 0,
+          "17:end_percent": 1,
+          "21:width": 512,
+          "21:height": 512,
+          "21:batch_size": 1,
+          "2:ckpt_name": "3dAnimationDiffusion_v10.safetensors"
+        },
+        "output": "qri-andres-silva__img2img_depthControlNet_12.png",
+        "randomizeSeed": true
+      }
+    },
+    {
+      "id": 35,
+      "type": "forge/ai/img2img_depthControlNet",
+      "pos": [
+        3764.932928828124,
+        1655.1583225781246
+      ],
+      "size": [
+        244.4009090625009,
+        691.2475367968755
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "values": {
+          "3:text": "beautiful flowing psychedelic waves of golden fractal energy",
+          "4:text": " watermark, blurry, low resolution, low quality, compression artifacts",
+          "5:seed": 938202191799962,
+          "5:steps": 20,
+          "5:cfg": 8,
+          "5:sampler_name": "euler",
+          "5:scheduler": "normal",
+          "5:denoise": 0.9,
+          "17:strength": 1,
+          "17:start_percent": 0,
+          "17:end_percent": 1,
+          "21:width": 512,
+          "21:height": 512,
+          "21:batch_size": 1,
+          "2:ckpt_name": "3dAnimationDiffusion_v10.safetensors"
+        },
+        "output": "qri-andres-silva__img2img_depthControlNet_12.png",
+        "randomizeSeed": true
+      }
+    },
+    {
+      "id": 37,
+      "type": "forge/ai/AIWorkshop_img2img",
+      "pos": [
+        3211,
+        1871
+      ],
+      "size": {
+        "0": 210,
+        "1": 414
+      },
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "Input image",
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "values": {
+          "4:text": "(character:1.3), person, (face:1.5), (eyes:1.5), human, animal, watermark, blurry, low resolution, low quality, compression artifacts",
+          "3:text": "a beautiful studio lit photograph, three points lighting, An (abstract:1.5) logo for a cool AI workshop, blobby text, liquid",
+          "2:ckpt_name": "3dAnimationDiffusion_v10.safetensors",
+          "5:seed": 650888061691212,
+          "5:steps": 20,
+          "5:cfg": 8,
+          "5:sampler_name": "euler",
+          "5:scheduler": "normal",
+          "5:denoise": 0.7000000000000002
+        },
+        "output": "",
+        "randomizeSeed": true
+      }
+    },
+    {
+      "id": 38,
+      "type": "forge/ai/txt2img_controlNetDepth",
+      "pos": [
+        3487.933837890625,
+        1807.405859375
+      ],
+      "size": {
+        "0": 226.8000030517578,
+        "1": 558
+      },
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "values": {
+          "3:text": "a  shuicai watercolor scene painting of An (abstract:1.5) logo for a cool AI workshop, blobby text, liquid",
+          "4:text": "(character:1.3), person, (face:1.5), (eyes:1.5), human, animal, watermark, blurry, low resolution, low quality, compression artifacts",
+          "5:seed": 22522392901655,
+          "5:steps": 20,
+          "5:cfg": 8,
+          "5:sampler_name": "euler",
+          "5:scheduler": "normal",
+          "5:denoise": 1,
+          "17:strength": 1,
+          "17:start_percent": 0,
+          "17:end_percent": 1,
+          "2:ckpt_name": "3dAnimationDiffusion_v10.safetensors",
+          "21:width": 512,
+          "21:height": 512,
+          "21:batch_size": 1
+        },
+        "output": "",
+        "randomizeSeed": true
+      }
+    },
+    {
+      "id": 25,
+      "type": "forge/shader/blend",
+      "pos": [
+        3802.726611685347,
+        960.1658472697894
+      ],
+      "size": {
+        "0": 210,
+        "1": 242
+      },
+      "flags": {},
+      "order": 25,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 48
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 44
+        },
+        {
+          "name": "Mix",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Swap A/B",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            45,
+            49,
+            50,
+            57
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uMode": 1,
+          "uMix": 0.3666436828997576,
+          "uSwap": true
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 22,
+      "type": "forge/shader/blend",
+      "pos": [
+        2691,
+        1322
+      ],
+      "size": [
+        210.33928359375022,
+        286.3583960937501
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 38
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 39
+        },
+        {
+          "name": "Mix",
+          "type": "number",
+          "link": null
+        },
+        {
+          "name": "Swap A/B",
+          "type": "number",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            40,
+            41,
+            47,
+            58
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uMode": 2,
+          "uMix": 1,
+          "uSwap": false
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 39,
+      "type": "forge/ai/img2img_depthControlNet",
+      "pos": [
+        4183,
+        2227
+      ],
+      "size": {
+        "0": 226.8000030517578,
+        "1": 578
+      },
+      "flags": {},
+      "order": 29,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 57
+        },
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 58
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "values": {
+          "3:text": "an extremely dense and intricate fluid dynamics simulation with whirling vortices, rainbow colors.",
+          "4:text": "animal, watermark, blurry, low resolution, low quality, compression artifacts",
+          "5:seed": 765854633532199,
+          "5:steps": 20,
+          "5:cfg": 8,
+          "5:sampler_name": "euler",
+          "5:scheduler": "normal",
+          "5:denoise": 0.6,
+          "17:strength": 1,
+          "17:start_percent": 0,
+          "17:end_percent": 1,
+          "21:width": 512,
+          "21:height": 512,
+          "21:batch_size": 1,
+          "2:ckpt_name": "cyberrealistic_v90.safetensors"
+        },
+        "output": "qri-andres-silva__img2img_depthControlNet_13.png",
+        "randomizeSeed": true
+      }
+    }
+  ],
+  "links": [
+    [
+      3,
+      2,
+      0,
+      6,
+      0,
+      "IMAGE"
+    ],
+    [
+      4,
+      2,
+      0,
+      7,
+      0,
+      "IMAGE"
+    ],
+    [
+      5,
+      6,
+      0,
+      7,
+      1,
+      "IMAGE"
+    ],
+    [
+      10,
+      7,
+      0,
+      8,
+      1,
+      "IMAGE"
+    ],
+    [
+      12,
+      8,
+      0,
+      9,
+      0,
+      "IMAGE"
+    ],
+    [
+      13,
+      6,
+      0,
+      9,
+      1,
+      "IMAGE"
+    ],
+    [
+      14,
+      9,
+      0,
+      11,
+      0,
+      "IMAGE"
+    ],
+    [
+      15,
+      2,
+      0,
+      12,
+      0,
+      "IMAGE"
+    ],
+    [
+      22,
+      6,
+      0,
+      8,
+      0,
+      "IMAGE"
+    ],
+    [
+      23,
+      11,
+      0,
+      14,
+      0,
+      "IMAGE"
+    ],
+    [
+      28,
+      9,
+      0,
+      18,
+      1,
+      "IMAGE"
+    ],
+    [
+      29,
+      12,
+      0,
+      18,
+      0,
+      "IMAGE"
+    ],
+    [
+      31,
+      2,
+      0,
+      15,
+      1,
+      "IMAGE"
+    ],
+    [
+      32,
+      6,
+      0,
+      19,
+      0,
+      "IMAGE"
+    ],
+    [
+      34,
+      19,
+      0,
+      11,
+      1,
+      "IMAGE"
+    ],
+    [
+      35,
+      19,
+      0,
+      21,
+      0,
+      "IMAGE"
+    ],
+    [
+      36,
+      11,
+      0,
+      21,
+      1,
+      "IMAGE"
+    ],
+    [
+      38,
+      21,
+      0,
+      22,
+      0,
+      "IMAGE"
+    ],
+    [
+      39,
+      18,
+      0,
+      22,
+      1,
+      "IMAGE"
+    ],
+    [
+      40,
+      22,
+      0,
+      15,
+      0,
+      "IMAGE"
+    ],
+    [
+      41,
+      22,
+      0,
+      23,
+      1,
+      "IMAGE"
+    ],
+    [
+      42,
+      15,
+      0,
+      23,
+      0,
+      "IMAGE"
+    ],
+    [
+      44,
+      23,
+      0,
+      25,
+      1,
+      "IMAGE"
+    ],
+    [
+      45,
+      25,
+      0,
+      24,
+      0,
+      "IMAGE"
+    ],
+    [
+      46,
+      2,
+      0,
+      26,
+      0,
+      "IMAGE"
+    ],
+    [
+      47,
+      22,
+      0,
+      26,
+      1,
+      "IMAGE"
+    ],
+    [
+      48,
+      26,
+      0,
+      25,
+      0,
+      "IMAGE"
+    ],
+    [
+      49,
+      25,
+      0,
+      27,
+      0,
+      "IMAGE"
+    ],
+    [
+      50,
+      25,
+      0,
+      28,
+      0,
+      "IMAGE"
+    ],
+    [
+      51,
+      2,
+      0,
+      29,
+      0,
+      "IMAGE"
+    ],
+    [
+      52,
+      30,
+      0,
+      31,
+      0,
+      "IMAGE"
+    ],
+    [
+      53,
+      31,
+      0,
+      32,
+      0,
+      "IMAGE"
+    ],
+    [
+      56,
+      33,
+      0,
+      34,
+      0,
+      "IMAGE"
+    ],
+    [
+      57,
+      25,
+      0,
+      39,
+      0,
+      "IMAGE"
+    ],
+    [
+      58,
+      22,
+      0,
+      39,
+      1,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}

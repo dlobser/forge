@@ -1,0 +1,19 @@
+{
+  "file": "qri2__Kuramoto_Field.png",
+  "created": 1781821717.5501096,
+  "kind": "shader",
+  "shader": "kuramoto",
+  "color": "qri2_sitting2_depth.png",
+  "depth": "qri2_sitting2.png",
+  "params": {
+    "uK": 2.6,
+    "uAlpha": 0.19,
+    "uDt": 0.07,
+    "uNoise": 0.03,
+    "uFreqA": 2.82,
+    "uCoupB": 1,
+    "uSeedA": true,
+    "uDisplayMode": 0
+  },
+  "outputSize": 1024
+}

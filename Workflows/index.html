@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ComfyUI Text-to-Image Generator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 40px;
+            max-width: 600px;
+            width: 100%;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #555;
+            font-weight: 500;
+        }
+
+        input[type="text"], input[type="url"] {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+            background: rgba(255, 255, 255, 0.9);
+        }
+
+        input[type="text"]:focus, input[type="url"]:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        button {
+            width: 100%;
+            padding: 15px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        button:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            font-weight: 500;
+            display: none;
+        }
+
+        .status.loading {
+            background: rgba(255, 193, 7, 0.1);
+            color: #856404;
+            border: 1px solid rgba(255, 193, 7, 0.2);
+            display: block;
+        }
+
+        .status.success {
+            background: rgba(40, 167, 69, 0.1);
+            color: #155724;
+            border: 1px solid rgba(40, 167, 69, 0.2);
+            display: block;
+        }
+
+        .status.error {
+            background: rgba(220, 53, 69, 0.1);
+            color: #721c24;
+            border: 1px solid rgba(220, 53, 69, 0.2);
+            display: block;
+        }
+
+        .result-container {
+            margin-top: 30px;
+            text-align: center;
+        }
+
+        .result-image {
+            max-width: 100%;
+            height: auto;
+            border-radius: 15px;
+            box-shadow: 0 15px 30px rgba(0, 0, 0, 0.2);
+            display: none;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            margin-right: 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .config-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(102, 126, 234, 0.05);
+            border-radius: 10px;
+            border: 1px solid rgba(102, 126, 234, 0.1);
+        }
+
+        .instructions {
+            background: rgba(255, 193, 7, 0.1);
+            border: 1px solid rgba(255, 193, 7, 0.3);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+            color: #856404;
+        }
+
+        .instructions h3 {
+            margin-bottom: 15px;
+            color: #856404;
+        }
+
+        .instructions ul {
+            margin-left: 20px;
+        }
+
+        .instructions li {
+            margin-bottom: 8px;
+        }
+
+        .config-section h3 {
+            color: #555;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>ComfyUI Generator</h1>
+        
+        <div class="instructions">
+            <h3>⚠️ Setup Required</h3>
+            <p>To use this interface, you need to:</p>
+            <ul>
+                <li>Have ComfyUI running locally or on a server</li>
+                <li>Enable CORS in ComfyUI by adding <code>--enable-cors-header</code> to the startup command</li>
+                <li>Example: <code>python main.py --enable-cors-header</code></li>
+                <li>Make sure the URL below matches your ComfyUI server address</li>
+            </ul>
+        </div>
+        
+        <div class="config-section">
+            <h3>Configuration</h3>
+            <div class="form-group">
+                <label for="comfyui-url">ComfyUI Server URL:</label>
+                <input type="url" id="comfyui-url" value="http://localhost:8188" placeholder="http://localhost:8188">
+            </div>
+        </div>
+
+        <div id="generate-form">
+            <div class="form-group">
+                <label for="prompt">Enter your prompt:</label>
+                <input type="text" id="prompt" placeholder="a beautiful landscape with mountains and a lake" required>
+            </div>
+            
+            <button type="button" id="generate-btn">Generate Image</button>
+        </div>
+
+        <div class="status" id="status"></div>
+
+        <div class="result-container">
+            <img class="result-image" id="result-image" alt="Generated image">
+        </div>
+    </div>
+
+    <script>
+        class ComfyUIClient {
+            constructor(baseUrl) {
+                this.baseUrl = baseUrl;
+                this.availableModels = null;
+            }
+
+            // Get available checkpoints
+            async getObjectInfo() {
+                try {
+                    const response = await fetch(`${this.baseUrl}/object_info`, {
+                        mode: 'cors'
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    return await response.json();
+                } catch (error) {
+                    console.warn('Could not fetch object info:', error);
+                    return null;
+                }
+            }
+
+            // Get available checkpoints
+            async getCheckpoints() {
+                try {
+                    const response = await fetch(`${this.baseUrl}/object_info/CheckpointLoaderSimple`, {
+                        mode: 'cors'
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    return data?.input?.required?.ckpt_name?.[0] || [];
+                } catch (error) {
+                    console.warn('Could not fetch checkpoints:', error);
+                    return [];
+                }
+            }
+
+            // Create workflow using your exact structure
+            async createWorkflow(prompt) {
+                // Try to get available checkpoints
+                const checkpoints = await this.getCheckpoints();
+                
+                // Use first available checkpoint, or fall back to your model
+                let modelName = "3dAnimationDiffusion_v10.safetensors"; // Your default
+                if (checkpoints.length > 0) {
+                    modelName = checkpoints[0];
+                }
+
+                // Your exact workflow structure
+                const workflow = {
+                    "2": {
+                        "inputs": {
+                            "ckpt_name": modelName
+                        },
+                        "class_type": "CheckpointLoaderSimple",
+                        "_meta": {
+                            "title": "Load Checkpoint"
+                        }
+                    },
+                    "3": {
+                        "inputs": {
+                            "text": prompt,
+                            "clip": ["2", 1]
+                        },
+                        "class_type": "CLIPTextEncode",
+                        "_meta": {
+                            "title": "CLIP Text Encode (Prompt)"
+                        }
+                    },
+                    "4": {
+                        "inputs": {
+                            "text": "(character:1.3), person, (face:1.5), (eyes:1.5), human, animal, watermark, blurry, low resolution, low quality, compression artifacts",
+                            "clip": ["2", 1]
+                        },
+                        "class_type": "CLIPTextEncode",
+                        "_meta": {
+                            "title": "CLIP Text Encode (Negative)"
+                        }
+                    },
+                    "5": {
+                        "inputs": {
+                            "seed": Math.floor(Math.random() * 1000000000000),
+                            "steps": 20,
+                            "cfg": 8,
+                            "sampler_name": "euler",
+                            "scheduler": "normal",
+                            "denoise": 1,
+                            "model": ["2", 0],
+                            "positive": ["3", 0],
+                            "negative": ["4", 0],
+                            "latent_image": ["6", 0]
+                        },
+                        "class_type": "KSampler",
+                        "_meta": {
+                            "title": "KSampler"
+                        }
+                    },
+                    "6": {
+                        "inputs": {
+                            "width": 512,
+                            "height": 512,
+                            "batch_size": 1
+                        },
+                        "class_type": "EmptyLatentImage",
+                        "_meta": {
+                            "title": "Empty Latent Image"
+                        }
+                    },
+                    "7": {
+                        "inputs": {
+                            "samples": ["5", 0],
+                            "vae": ["2", 2]
+                        },
+                        "class_type": "VAEDecode",
+                        "_meta": {
+                            "title": "VAE Decode"
+                        }
+                    },
+                    "8": {
+                        "inputs": {
+                            "images": ["7", 0]
+                        },
+                        "class_type": "PreviewImage",
+                        "_meta": {
+                            "title": "Preview Image"
+                        }
+                    }
+                };
+
+                return workflow;
+            }
+
+            async queuePrompt(workflow) {
+                try {
+                    console.log('Sending workflow:', JSON.stringify(workflow, null, 2));
+                    
+                    const response = await fetch(`${this.baseUrl}/prompt`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ prompt: workflow }),
+                        mode: 'cors'
+                    });
+
+                    const responseText = await response.text();
+                    console.log('ComfyUI response:', responseText);
+
+                    if (!response.ok) {
+                        let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+                        try {
+                            const errorData = JSON.parse(responseText);
+                            if (errorData.error) {
+                                errorMessage += `\nComfyUI Error: ${errorData.error}`;
+                            }
+                            if (errorData.node_errors) {
+                                errorMessage += `\nNode Errors: ${JSON.stringify(errorData.node_errors, null, 2)}`;
+                            }
+                        } catch (e) {
+                            errorMessage += `\nResponse: ${responseText}`;
+                        }
+                        throw new Error(errorMessage);
+                    }
+
+                    return JSON.parse(responseText);
+                } catch (error) {
+                    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                        throw new Error(`Cannot connect to ComfyUI server at ${this.baseUrl}. Please check:\n1. ComfyUI is running\n2. Server allows CORS requests\n3. URL is correct`);
+                    }
+                    throw error;
+                }
+            }
+
+            async checkProgress(promptId) {
+                try {
+                    const response = await fetch(`${this.baseUrl}/history/${promptId}`, {
+                        mode: 'cors'
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    return await response.json();
+                } catch (error) {
+                    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                        throw new Error(`Lost connection to ComfyUI server`);
+                    }
+                    throw error;
+                }
+            }
+
+            async getImage(filename, subfolder = '', type = 'output') {
+                const params = new URLSearchParams({
+                    filename: filename,
+                    subfolder: subfolder,
+                    type: type
+                });
+
+                try {
+                    const response = await fetch(`${this.baseUrl}/view?${params}`, {
+                        mode: 'cors'
+                    });
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    return response.blob();
+                } catch (error) {
+                    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                        throw new Error(`Cannot retrieve image from ComfyUI server`);
+                    }
+                    throw error;
+                }
+            }
+
+            async waitForCompletion(promptId) {
+                return new Promise((resolve, reject) => {
+                    const checkStatus = async () => {
+                        try {
+                            const history = await this.checkProgress(promptId);
+                            
+                            if (history[promptId]) {
+                                const historyData = history[promptId];
+                                if (historyData.status && historyData.status.completed) {
+                                    resolve(historyData);
+                                    return;
+                                }
+                            }
+                            
+                            setTimeout(checkStatus, 1000);
+                        } catch (error) {
+                            reject(error);
+                        }
+                    };
+                    
+                    checkStatus();
+                });
+            }
+        }
+
+        // UI Handler
+        class UIHandler {
+            constructor() {
+                this.generateForm = document.getElementById('generate-form');
+                this.promptInput = document.getElementById('prompt');
+                this.urlInput = document.getElementById('comfyui-url');
+                this.generateBtn = document.getElementById('generate-btn');
+                this.status = document.getElementById('status');
+                this.resultImage = document.getElementById('result-image');
+                
+                this.bindEvents();
+            }
+
+            bindEvents() {
+                this.generateBtn.addEventListener('click', () => this.handleGenerate());
+                this.promptInput.addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        e.preventDefault();
+                        this.handleGenerate();
+                    }
+                });
+            }
+
+            async handleGenerate() {
+                
+                const prompt = this.promptInput.value.trim();
+                const comfyUIUrl = this.urlInput.value.trim();
+                
+                if (!prompt) {
+                    this.showStatus('Please enter a prompt', 'error');
+                    return;
+                }
+
+                this.setLoading(true);
+                this.showStatus('Generating image...', 'loading');
+                this.resultImage.style.display = 'none';
+
+                try {
+                    const client = new ComfyUIClient(comfyUIUrl);
+                    
+                    this.showStatus('Checking available models...', 'loading');
+                    const workflow = await client.createWorkflow(prompt);
+                    
+                    this.showStatus('Sending request to ComfyUI...', 'loading');
+                    const queueResponse = await client.queuePrompt(workflow);
+                    const promptId = queueResponse.prompt_id;
+                    
+                    this.showStatus('Waiting for generation to complete...', 'loading');
+                    const completedHistory = await client.waitForCompletion(promptId);
+                    
+                    // Find the preview image
+                    const outputs = completedHistory.outputs;
+                    let imageInfo = null;
+                    
+                    // Look for PreviewImage node output (node 8 in your workflow)
+                    if (outputs["8"] && outputs["8"].images && outputs["8"].images.length > 0) {
+                        imageInfo = outputs["8"].images[0];
+                    } else {
+                        // Fallback: search all outputs for any images
+                        for (const nodeId in outputs) {
+                            const nodeOutput = outputs[nodeId];
+                            if (nodeOutput.images && nodeOutput.images.length > 0) {
+                                imageInfo = nodeOutput.images[0];
+                                break;
+                            }
+                        }
+                    }
+                    
+                    if (!imageInfo) {
+                        throw new Error('No image found in the output');
+                    }
+                    
+                    this.showStatus('Loading image...', 'loading');
+                    const imageBlob = await client.getImage(imageInfo.filename, imageInfo.subfolder, imageInfo.type);
+                    const imageUrl = URL.createObjectURL(imageBlob);
+                    
+                    this.resultImage.src = imageUrl;
+                    this.resultImage.style.display = 'block';
+                    this.showStatus('Image generated successfully!', 'success');
+                    
+                } catch (error) {
+                    console.error('Error generating image:', error);
+                    this.showStatus(`Error: ${error.message}`, 'error');
+                } finally {
+                    this.setLoading(false);
+                }
+            }
+
+            setLoading(isLoading) {
+                this.generateBtn.disabled = isLoading;
+                this.generateBtn.innerHTML = isLoading ? 
+                    '<span class="spinner"></span>Generating...' : 
+                    'Generate Image';
+            }
+
+            showStatus(message, type) {
+                this.status.textContent = message;
+                this.status.className = `status ${type}`;
+            }
+        }
+
+        // Initialize the app
+        document.addEventListener('DOMContentLoaded', () => {
+            new UIHandler();
+        });
+    </script>
+</body>
+</html>

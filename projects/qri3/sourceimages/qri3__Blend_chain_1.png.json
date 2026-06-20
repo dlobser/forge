@@ -1,0 +1,14 @@
+{
+  "file": "qri3__Blend_chain_1.png",
+  "created": 1781828081.95714,
+  "kind": "shader",
+  "shader": "blend",
+  "color": "qri3__Erosion_chain_1.png",
+  "depth": "qri3__AIWorkshop_txt2img_14.png",
+  "params": {
+    "uMode": 2,
+    "uMix": 0.73,
+    "uSwap": false
+  },
+  "chain": true
+}

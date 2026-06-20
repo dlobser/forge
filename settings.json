@@ -1,0 +1,25 @@
+{
+  "comfy": {
+    "host": "127.0.0.1",
+    "port": 8188
+  },
+  "paths": {
+    "workflows_dir": "C:\\_Main\\ai\\QRI\\Workflows",
+    "projects_dir": "C:\\_Main\\ai\\QRI\\projects",
+    "shaders_dir": "C:\\_Main\\ai\\QRI\\shaders"
+  },
+  "depth": {
+    "preprocessors": [
+      "DepthAnythingV2Preprocessor",
+      "DepthAnythingPreprocessor",
+      "Zoe-DepthMapPreprocessor",
+      "MiDaS-DepthMapPreprocessor"
+    ],
+    "resolution": 1024
+  },
+  "video": {
+    "fps": 24,
+    "command": "ffmpeg -y -framerate {fps} -start_number {start} -i \"{frames_in}\" -c:v libx264 -pix_fmt yuv420p -crf 17 \"{out}\""
+  },
+  "current_project": "qri-andres-silva"
+}

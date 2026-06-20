@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Forge Graph</title>
+  <link rel="stylesheet" href="/web/graph/vendor/litegraph.css" />
+  <style>
+    :root{
+      --bg:#0d0f12; --panel:#15181d; --line:#262b33; --text:#e6e8ea; --muted:#8a929c;
+      --accent:#5b8cff; --accent2:#37d0a0; --good:#37d0a0; --bad:#ff5d6c;
+    }
+    *{ box-sizing:border-box; }
+    html,body{ margin:0; height:100%; background:var(--bg); color:var(--text);
+      font:13px/1.4 -apple-system,Segoe UI,Roboto,sans-serif; overflow:hidden; }
+    #topbar{ height:46px; display:flex; align-items:center; gap:8px; padding:0 12px;
+      background:var(--panel); border-bottom:1px solid var(--line); position:relative; z-index:5; }
+    #topbar .brand{ letter-spacing:3px; font-weight:300; color:var(--muted); margin-right:8px; }
+    #topbar .brand b{ color:var(--accent); font-weight:700; }
+    #topbar label{ color:var(--muted); text-transform:uppercase; font-size:10px; letter-spacing:1px; }
+    #topbar .spacer{ flex:1; }
+    select,.btn{ background:#1c2028; color:var(--text); border:1px solid var(--line);
+      border-radius:6px; padding:5px 9px; font-size:12px; cursor:pointer; }
+    .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+    .btn.go{ background:#1d3a30; border-color:#2a5c4a; color:var(--good); }
+    .dot{ display:inline-flex; align-items:center; gap:6px; color:var(--bad); font-size:12px; }
+    .dot::before{ content:""; width:8px; height:8px; border-radius:50%; background:var(--bad); }
+    .dot.ok{ color:var(--good); } .dot.ok::before{ background:var(--good); }
+    #graphcanvas{ display:block; width:100vw; height:calc(100vh - 46px); }
+    /* the engine's WebGL canvas renders offscreen; we drawImage() it into nodes */
+    #glcanvas{ position:absolute; left:-10000px; top:0; width:512px; height:512px; }
+    #toast{ position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:50;
+      display:flex; flex-direction:column; gap:6px; align-items:center; pointer-events:none; }
+    #toast .t{ background:#000d; border:1px solid var(--line); border-radius:8px; padding:8px 14px;
+      font-size:12px; } #toast .t.good{ border-color:var(--good); } #toast .t.bad{ border-color:var(--bad); }
+    #viewerOverlay{ position:fixed; inset:0; background:#000e; z-index:60; display:flex;
+      align-items:center; justify-content:center; cursor:zoom-out; }
+    #viewerOverlay img{ max-width:94vw; max-height:94vh; image-rendering:auto; }
+    [hidden]{ display:none !important; }
+  </style>
+</head>
+<body>
+  <div id="topbar">
+    <span class="brand">FORGE <b>GRAPH</b></span>
+    <label>Project</label>
+    <select id="projectSelect"></select>
+    <button id="newProjectBtn" class="btn" title="New project">＋</button>
+    <button id="importBtn" class="btn">Import…</button>
+    <input id="importInput" type="file" accept="image/*" hidden multiple />
+    <span class="spacer"></span>
+    <button id="addNodeBtn" class="btn">＋ Add node</button>
+    <button id="saveGraphBtn" class="btn">Save graph</button>
+    <a class="btn" href="/" title="Open the classic (chain) version" target="_blank">classic ↗</a>
+    <span id="comfyDot" class="dot">comfy</span>
+  </div>
+  <canvas id="graphcanvas" tabindex="1"></canvas>
+  <canvas id="glcanvas" width="512" height="512"></canvas>
+  <div id="toast"></div>
+  <div id="viewerOverlay" hidden><img id="viewerImg" alt="" /></div>
+
+  <script src="/web/graph/vendor/litegraph.js"></script>
+  <script type="module" src="/web/graph/js/graphApp.js"></script>
+</body>
+</html>

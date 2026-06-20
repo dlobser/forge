@@ -1,0 +1,21 @@
+{
+  "file": "Demo__AIWorkshop_txt2img.png",
+  "created": 1781809222.8161116,
+  "kind": "ai",
+  "workflow": "AIWorkshop_txt2img",
+  "values": {
+    "6:width": 512,
+    "6:height": 512,
+    "6:batch_size": 1,
+    "5:seed": 441476607186392,
+    "5:steps": 20,
+    "5:cfg": 8,
+    "5:sampler_name": "euler",
+    "5:scheduler": "normal",
+    "5:denoise": 1,
+    "2:ckpt_name": "3dAnimationDiffusion_v10.safetensors",
+    "4:text": "(character:1.3), person, (face:1.5), (eyes:1.5), human, animal, watermark, blurry, low resolution, low quality, compression artifacts",
+    "3:text": "a beautiful studio lit photograph, three points lighting, An (abstract:1.5) logo for a cool AI workshop, blobby text, liquid"
+  },
+  "images": {}
+}

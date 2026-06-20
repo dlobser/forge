@@ -1,0 +1,639 @@
+{
+  "last_node_id": 11,
+  "last_link_id": 19,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "forge/ai/AIWorkshop_txt2img",
+      "pos": [
+        -63,
+        446
+      ],
+      "size": {
+        "0": 210,
+        "1": 486
+      },
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            1,
+            5,
+            7
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "values": {
+          "6:width": 512,
+          "6:height": 512,
+          "6:batch_size": 1,
+          "5:seed": 223792954275139,
+          "5:steps": 20,
+          "5:cfg": 8,
+          "5:sampler_name": "euler",
+          "5:scheduler": "normal",
+          "5:denoise": 1,
+          "2:ckpt_name": "cyberrealistic_v90.safetensors",
+          "4:text": "human, animal, watermark, blurry, low resolution, low quality, compression artifacts",
+          "3:text": "a beautiful rendering of an old oak tree, in the center of frame. an extremely photorealistic photograph in mexico."
+        },
+        "output": "qri7__AIWorkshop_txt2img.png",
+        "randomizeSeed": true
+      }
+    },
+    {
+      "id": 3,
+      "type": "forge/shader/kuramoto",
+      "pos": [
+        556,
+        460
+      ],
+      "size": {
+        "0": 210,
+        "1": 410
+      },
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "Image A \u2192 freq",
+          "type": "IMAGE",
+          "link": 4
+        },
+        {
+          "name": "Image B \u2192 coupling",
+          "type": "IMAGE",
+          "link": 5
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            6,
+            10
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uK": 3.0598387254677846,
+          "uAlpha": 0.45448703753775044,
+          "uDt": 0.025537165020382474,
+          "uNoise": 0.473314817505828,
+          "uFreqA": 3.5161753991715186,
+          "uCoupB": 0.27380235812410786,
+          "uSeedA": true,
+          "uDisplayMode": 0
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 2,
+      "type": "forge/ai/Depth",
+      "pos": [
+        187,
+        574
+      ],
+      "size": {
+        "0": 210,
+        "1": 174
+      },
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "Input image",
+          "type": "IMAGE",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            4,
+            12,
+            18
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "values": {},
+        "output": "qri7__Depth.png",
+        "randomizeSeed": true
+      }
+    },
+    {
+      "id": 4,
+      "type": "forge/shader/blend",
+      "pos": [
+        831,
+        528
+      ],
+      "size": {
+        "0": 210,
+        "1": 242
+      },
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 6
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            11
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uMode": 0,
+          "uMix": 0.19677757223198633,
+          "uSwap": true
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 5,
+      "type": "forge/shader/distortion",
+      "pos": [
+        1099,
+        619
+      ],
+      "size": {
+        "0": 210,
+        "1": 242
+      },
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 11
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            14
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uStrength": -0.00046120152841616635,
+          "uSampleRadius": 4.693030645015824,
+          "uMode": 0
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 10,
+      "type": "forge/shader/depthEdges",
+      "pos": [
+        274.92290826367184,
+        1010.5649528437501
+      ],
+      "size": {
+        "0": 210,
+        "1": 266
+      },
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 18
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            19
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uEdgeMix": 0.9500407097367675,
+          "uEdgeScale": 5.22030791842146,
+          "uThreshold": 0.04,
+          "uEdgeColor": [
+            1,
+            1,
+            1
+          ]
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 11,
+      "type": "forge/shader/erosion",
+      "pos": [
+        519.4102249837892,
+        1012.4615686906251
+      ],
+      "size": {
+        "0": 210,
+        "1": 318
+      },
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": null
+        }
+      ],
+      "properties": {
+        "params": {
+          "uThreshold": 0.5350529063831662,
+          "uSpread": 0.1879882118918668,
+          "uSteps": 28,
+          "uFalloff": 1,
+          "uBands": 0,
+          "uInvert": false,
+          "uTint": [
+            1,
+            1,
+            1
+          ]
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 6,
+      "type": "forge/shader/noise",
+      "pos": [
+        870,
+        984
+      ],
+      "size": {
+        "0": 210,
+        "1": 438
+      },
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "distort",
+          "type": "IMAGE",
+          "link": 12
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            15
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uScale": 16,
+          "uOctaves": 8,
+          "uLacunarity": 2.1254083913167316,
+          "uGain": 0.5227633565266926,
+          "uSpeed": 0.6755318299499284,
+          "uDistortAmt": 1,
+          "uRadial": true,
+          "uContrast": 1,
+          "uRidged": false,
+          "uColorA": [
+            0,
+            0,
+            0
+          ],
+          "uColorB": [
+            1,
+            1,
+            1
+          ]
+        },
+        "simSize": 256,
+        "animate": true
+      }
+    },
+    {
+      "id": 8,
+      "type": "forge/shader/colorGrade",
+      "pos": [
+        1144,
+        987
+      ],
+      "size": {
+        "0": 210,
+        "1": 362
+      },
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "Color",
+          "type": "IMAGE",
+          "link": 15
+        },
+        {
+          "name": "Mask",
+          "type": "IMAGE",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            16
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uHue": 0.13383838383838342,
+          "uSat": 2,
+          "uContrast": 2,
+          "uBright": 0.530303030303033,
+          "uUseDepthMask": false,
+          "uMaskLo": 0.2,
+          "uMaskHi": 0.8,
+          "uMaskInvert": false
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 7,
+      "type": "forge/shader/blend",
+      "pos": [
+        1434,
+        958
+      ],
+      "size": {
+        "0": 210,
+        "1": 242
+      },
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "color",
+          "type": "IMAGE",
+          "link": 14
+        },
+        {
+          "name": "depth",
+          "type": "IMAGE",
+          "link": 16
+        }
+      ],
+      "outputs": [
+        {
+          "name": "out",
+          "type": "IMAGE",
+          "links": [
+            17
+          ],
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "params": {
+          "uMode": 0,
+          "uMix": 1,
+          "uSwap": false
+        },
+        "simSize": 256,
+        "animate": false
+      }
+    },
+    {
+      "id": 9,
+      "type": "forge/viewer",
+      "pos": [
+        1778,
+        930
+      ],
+      "size": [
+        576.1854812500005,
+        594.3065781152347
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 17
+        }
+      ],
+      "properties": {}
+    }
+  ],
+  "links": [
+    [
+      1,
+      1,
+      0,
+      2,
+      0,
+      "IMAGE"
+    ],
+    [
+      4,
+      2,
+      0,
+      3,
+      0,
+      "IMAGE"
+    ],
+    [
+      5,
+      1,
+      0,
+      3,
+      1,
+      "IMAGE"
+    ],
+    [
+      6,
+      3,
+      0,
+      4,
+      0,
+      "IMAGE"
+    ],
+    [
+      7,
+      1,
+      0,
+      4,
+      1,
+      "IMAGE"
+    ],
+    [
+      10,
+      3,
+      0,
+      5,
+      1,
+      "IMAGE"
+    ],
+    [
+      11,
+      4,
+      0,
+      5,
+      0,
+      "IMAGE"
+    ],
+    [
+      12,
+      2,
+      0,
+      6,
+      0,
+      "IMAGE"
+    ],
+    [
+      14,
+      5,
+      0,
+      7,
+      0,
+      "IMAGE"
+    ],
+    [
+      15,
+      6,
+      0,
+      8,
+      0,
+      "IMAGE"
+    ],
+    [
+      16,
+      8,
+      0,
+      7,
+      1,
+      "IMAGE"
+    ],
+    [
+      17,
+      7,
+      0,
+      9,
+      0,
+      "IMAGE"
+    ],
+    [
+      18,
+      2,
+      0,
+      10,
+      1,
+      "IMAGE"
+    ],
+    [
+      19,
+      10,
+      0,
+      11,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [
+    {
+      "title": "Group",
+      "bounding": [
+        236,
+        932,
+        567,
+        524
+      ],
+      "color": "#3f789e",
+      "font_size": 24
+    }
+  ],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}
