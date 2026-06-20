@@ -33,6 +33,12 @@
       display:flex; flex-direction:column; gap:6px; align-items:center; pointer-events:none; }
     #toast .t{ background:#000d; border:1px solid var(--line); border-radius:8px; padding:8px 14px;
       font-size:12px; } #toast .t.good{ border-color:var(--good); } #toast .t.bad{ border-color:var(--bad); }
+    #settingsPanel{ position:fixed; top:52px; right:12px; z-index:40; background:var(--panel);
+      border:1px solid var(--line); border-radius:8px; padding:12px; display:flex;
+      flex-direction:column; gap:8px; min-width:240px; box-shadow:0 8px 24px #000a; }
+    #settingsPanel .row{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
+    #settingsPanel label{ color:var(--muted); text-transform:uppercase; font-size:10px; letter-spacing:1px; }
+    #settingsPanel .hint{ color:var(--muted); font-size:11px; line-height:1.4; }
     #viewerOverlay{ position:fixed; inset:0; background:#000e; z-index:60; display:flex;
       align-items:center; justify-content:center; cursor:zoom-out; }
     #viewerOverlay img{ max-width:94vw; max-height:94vh; image-rendering:auto; }
@@ -48,10 +54,20 @@
     <button id="importBtn" class="btn">Import…</button>
     <input id="importInput" type="file" accept="image/*" hidden multiple />
     <span class="spacer"></span>
+    <button id="playBtn" class="btn" title="Pause">⏸</button>
     <button id="addNodeBtn" class="btn">＋ Add node</button>
     <button id="saveGraphBtn" class="btn">Save graph</button>
+    <button id="settingsBtn" class="btn" title="Settings">⚙</button>
     <a class="btn" href="/" title="Open the classic (chain) version" target="_blank">classic ↗</a>
     <span id="comfyDot" class="dot">comfy</span>
+  </div>
+  <div id="settingsPanel" hidden>
+    <div class="row"><label for="defaultRenderSize">Default render size</label>
+      <select id="defaultRenderSize">
+        <option value="256">256</option><option value="512">512</option>
+        <option value="1024">1024</option><option value="2048">2048</option><option value="4096">4096</option>
+      </select></div>
+    <div class="hint">Per node: right-click a shader node → <b>Render size</b>. (The feedback “sim grid” is a separate, internal resolution.)</div>
   </div>
   <canvas id="graphcanvas" tabindex="1"></canvas>
   <canvas id="glcanvas" width="512" height="512"></canvas>

@@ -11,11 +11,8 @@ uniform vec2  uResolution;
 uniform float uTime;
 uniform sampler2D uDistort;   // optional: warps the noise UVs (feed noise into noise)
 uniform float uDistortAmt;
-uniform float uRadial;        // 1 = push outward from centre, 0 = directional (R,G)
 uniform float uScrollX;       // directional scroll speed
 uniform float uScrollY;
-uniform float uCenterX;       // distortion centre for radial mode
-uniform float uCenterY;
 uniform float uScale;
 uniform float uOctaves;
 uniform float uLacunarity;
@@ -102,16 +99,14 @@ void main() {
     // optional domain warp from the distort input. Radial: push outward from the
     // centre, scaled by the input's brightness — a radial gradient blows the noise
     // outward in all directions. Directional: classic flow-map (R,G → x,y).
-    vec3 dcol = texture(uDistort, vUv).rgb;
-    vec2 off;
-    if (uRadial > 0.5) {
-        vec2 fc = vUv - vec2(uCenterX, uCenterY);
-        float r = length(fc);
-        off = (r > 1e-4 ? fc / r : vec2(0.0)) * dot(dcol, vec3(0.299, 0.587, 0.114));
-    } else {
-        off = dcol.xy - 0.5;   // directional flow-map (unconnected gray → no-op)
-    }
-    vec2 duv = vUv + off * uDistortAmt + vec2(uScrollX, uScrollY) * uTime;
+    // distort along the GRADIENT of the distort input's luminance — any bright/dark
+    // gradient pushes the noise along it (same as the Distort shader). Unconnected
+    // (flat grey) → zero gradient → no warp.
+    vec3 W = vec3(0.299, 0.587, 0.114);
+    vec2 e = 1.5 / uResolution;
+    float gx = dot(texture(uDistort, vUv + vec2(e.x, 0.0)).rgb, W) - dot(texture(uDistort, vUv - vec2(e.x, 0.0)).rgb, W);
+    float gy = dot(texture(uDistort, vUv + vec2(0.0, e.y)).rgb, W) - dot(texture(uDistort, vUv - vec2(0.0, e.y)).rgb, W);
+    vec2 duv = vUv + vec2(gx, gy) * uDistortAmt + vec2(uScrollX, uScrollY) * uTime;
     vec3 p = vec3(duv * uScale, uTime * uSpeed);
 
     float sum = 0.0, amp = 0.5, freq = 1.0, norm = 0.0;

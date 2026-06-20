@@ -21,29 +21,34 @@ export function hexToRgb(h) {
   return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
 }
 
+// Add a single shader widget for one control. Used by addShaderWidgets and
+// by _togglePinMode when switching a control back from pin to slider.
+export function addSingleShaderWidget(node, c) {
+  if (node.properties.params[c.uniform] === undefined) node.properties.params[c.uniform] = c.value;
+  const set = (v) => { node.properties.params[c.uniform] = v; markDirty(node); };
+  const cur = node.properties.params[c.uniform];
+  let w;
+  if (c.type === 'range') {
+    w = node.addWidget('slider', c.label, cur, set, { min: c.min, max: c.max, step: c.step ?? 0.01 });
+  } else if (c.type === 'bool') {
+    w = node.addWidget('toggle', c.label, !!cur, set);
+  } else if (c.type === 'select') {
+    const values = {};
+    (c.options || []).forEach((o, i) => { values[o.label ?? String(o)] = (o.value ?? i); });
+    w = node.addWidget('combo', c.label, cur, set, { values });
+  } else if (c.type === 'color') {
+    w = node.addWidget('text', c.label, rgbToHex(cur), (v) => set(hexToRgb(v)));
+  } else {
+    w = node.addWidget('number', c.label, cur, set, { step: (c.step ?? 0.01) * 10 });
+  }
+  if (w) { w._uniform = c.uniform; w._isColor = (c.type === 'color'); }
+  return w;
+}
+
 // Shader controls → widgets. Values live in node.properties.params[uniform].
 export function addShaderWidgets(node, def) {
   node.properties.params = node.properties.params || {};
-  for (const c of def.controls || []) {
-    if (node.properties.params[c.uniform] === undefined) node.properties.params[c.uniform] = c.value;
-    const set = (v) => { node.properties.params[c.uniform] = v; markDirty(node); };
-    const cur = node.properties.params[c.uniform];
-    let w;
-    if (c.type === 'range') {
-      w = node.addWidget('slider', c.label, cur, set, { min: c.min, max: c.max, step: c.step ?? 0.01 });
-    } else if (c.type === 'bool') {
-      w = node.addWidget('toggle', c.label, !!cur, set);
-    } else if (c.type === 'select') {
-      const values = {};
-      (c.options || []).forEach((o, i) => { values[o.label ?? String(o)] = (o.value ?? i); });
-      w = node.addWidget('combo', c.label, cur, set, { values });
-    } else if (c.type === 'color') {
-      w = node.addWidget('text', c.label, rgbToHex(cur), (v) => set(hexToRgb(v)));
-    } else {
-      w = node.addWidget('number', c.label, cur, set, { step: (c.step ?? 0.01) * 10 });
-    }
-    if (w) { w._uniform = c.uniform; w._isColor = (c.type === 'color'); }
-  }
+  for (const c of def.controls || []) addSingleShaderWidget(node, c);
 }
 
 // after a graph reload, make the widget displays match the restored params

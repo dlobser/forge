@@ -5,7 +5,7 @@
 // rAF loop calls node.evaluate(RT) in topological order.
 import { RT } from './runtime.js';
 import { loadImage } from './engine.js';
-import { addShaderWidgets, addAiWidgets, syncShaderWidgets } from './widgets.js';
+import { addShaderWidgets, addSingleShaderWidget, addAiWidgets, syncShaderWidgets, markDirty } from './widgets.js';
 
 const LG = window.LiteGraph;
 const IMG = 'IMAGE';
@@ -45,7 +45,10 @@ function sizeWithThumb(node) {
   if (node.size[0] < 210) node.size[0] = 210;
   node.size[1] += THUMB_H;
 }
+const nodeRenderSize = (node) => (node.properties && +node.properties.renderSize) || RT.RENDER_SIZE;
 function ensureOut(node) {
+  // node._size is the desired render resolution; realloc the texture if it changed
+  if (node._out && node._out.size !== node._size) { RT.engine.gl.deleteTexture(node._out.tex); node._out = null; }
   if (!node._out) node._out = { tex: RT.engine.allocTexture(node._size), size: node._size, version: 0 };
   return node._out;
 }
@@ -149,9 +152,9 @@ function makeShaderNode(def) {
   const pinnable = (def.controls || []).filter((c) => c.type === 'range' || c.type === 'number' || c.type === 'bool');
   function Node() {
     for (const name of inputs) this.addInput(labels[name] || name, IMG);
-    for (const c of pinnable) this.addInput(c.label, 'number');
+    // pinnable controls default to slider mode (no input pin); toggle via right-click
     this.addOutput('out', IMG);
-    this.properties = { params: {}, simSize: def.simSize || 256, animate: false };
+    this.properties = { params: {}, pinModes: {}, simSize: def.simSize || 256, animate: false };
     addShaderWidgets(this, def);
     if (def.feedback) {
       this.addWidget('combo', 'sim grid', this.properties.simSize, (v) => { this.properties.simSize = +v; this._seed = (this._seed || 0) + 1; RT.requestSave(); }, { values: [128, 256, 512] });
@@ -164,23 +167,51 @@ function makeShaderNode(def) {
     attachThumb(this); sizeWithThumb(this);
   }
   Node.title = def.name || def.key;
-  Node.prototype.onConfigure = function () { this._dirty = true; syncShaderWidgets(this); };
+
+  Node.prototype.onConfigure = function () {
+    this._dirty = true;
+    syncShaderWidgets(this);
+    const modes = this.properties.pinModes = this.properties.pinModes || {};
+    for (const c of pinnable) {
+      if (modes[c.uniform] === 'pin') {
+        // Remove widget (slider) for this control
+        const wIdx = (this.widgets || []).findIndex((w) => w._uniform === c.uniform);
+        if (wIdx >= 0) this.widgets.splice(wIdx, 1);
+        // Tag the restored input so evaluate() can find it
+        const inpIdx = (this.inputs || []).findIndex((s) => s.name === c.label && s.type === 'number');
+        if (inpIdx >= 0) this.inputs[inpIdx]._ctrlUniform = c.uniform;
+      } else {
+        // Slider mode: remove any leftover pin (backward compat with old saves)
+        const inpIdx = (this.inputs || []).findIndex((s) => s.name === c.label && s.type === 'number');
+        if (inpIdx >= 0) { this.disconnectInput(inpIdx); this.removeInput(inpIdx); }
+      }
+    }
+  };
+
   Node.prototype.evaluate = function () {
     const inTex = {}; const vers = [];
     inputs.forEach((name, i) => {
       const h = this.getInputData(i);
       if (h && h.tex) { inTex[name] = h.tex; vers.push(h.version | 0); } else vers.push(-1);
     });
-    // resolve params: a connected float pin overrides its widget value
+    // resolve params: a pin-mode control reads from its input; slider-mode uses the widget value
     const params = Object.assign({}, this.properties.params);
-    pinnable.forEach((c, j) => {
-      const v = this.getInputData(inputs.length + j);
-      if (typeof v === 'number' && !isNaN(v)) params[c.uniform] = (c.type === 'bool') ? (v > 0.5) : v;
+    const modes = this.properties.pinModes || {};
+    pinnable.forEach((c) => {
+      if (modes[c.uniform] === 'pin') {
+        const pinIdx = (this.inputs || []).findIndex((s) => s._ctrlUniform === c.uniform);
+        if (pinIdx >= 0) {
+          const v = this.getInputData(pinIdx);
+          if (typeof v === 'number' && !isNaN(v)) params[c.uniform] = (c.type === 'bool') ? (v > 0.5) : v;
+        }
+      }
     });
     const feedback = !!def.feedback;
-    const animate = feedback || (def.animated && this.properties.animate);   // re-render every frame
+    // animate only while playing (RT.advance); edits still re-render via _dirty/pkey
+    const animate = RT.advance && (feedback || (def.animated && this.properties.animate));
+    this._size = nodeRenderSize(this);
     const vkey = vers.join(',');
-    const pkey = JSON.stringify(params) + '|' + this.properties.simSize + '|' + (this._seed || 0) + '|' + (this.properties.animate ? 1 : 0);
+    const pkey = JSON.stringify(params) + '|' + this.properties.simSize + '|' + (this._seed || 0) + '|' + (this.properties.animate ? 1 : 0) + '|' + this._size;
     if (this._dirty || animate || vkey !== this._vkey || pkey !== this._pkey) {
       ensureOut(this);
       const simSize = +this.properties.simSize || def.simSize || 256;
@@ -188,7 +219,7 @@ function makeShaderNode(def) {
         key: def.key, vertSrc: def.vertSrc, fragSrc: def.fragSrc,
         controls: def.controls || [], params,
         inputs, inputTextures: inTex,
-        feedback, simSize, simKey: 'n' + this.id, advance: feedback, time: RT.time,
+        feedback, simSize, simKey: 'n' + this.id, advance: feedback && RT.advance, time: RT.time,
         resetToken: 'n' + this.id + '|' + simSize + '|' + vkey + '|' + (this._seed || 0),
       }, this._out.tex, this._size);
       this._out.version++;
@@ -197,6 +228,65 @@ function makeShaderNode(def) {
     this.setOutputData(0, this._out);
   };
   Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this._out.tex); };
+
+  // ── right-click menu: render size, plus pin ↔ slider per control ──
+  Node.prototype.getExtraMenuOptions = function () {
+    const node = this;
+    const modes = this.properties.pinModes || {};
+    const items = [{
+      content: 'Render size: ' + nodeRenderSize(this),
+      has_submenu: true,
+      callback: function (_v, _opts, e, menu) {
+        new LG.ContextMenu(['256', '512', '1024', '2048', '4096', 'custom…'], {
+          event: e, parentMenu: menu, callback: function (val) {
+            let s = parseInt(val, 10);
+            if (String(val).startsWith('custom')) s = parseInt(prompt('Render size (px):', String(nodeRenderSize(node))), 10);
+            if (s >= 64) { node.properties.renderSize = s; node._dirty = true; RT.requestSave(); RT.redraw(); }
+          }
+        });
+      }
+    }];
+    if (pinnable.length) items.push({
+      content: 'Input Modes',
+      has_submenu: true,
+      callback: function (_v, _opts, e, menu) {
+        const sub = pinnable.map((c, j) => {
+          const isPin = modes[c.uniform] === 'pin';
+          return { content: (isPin ? '● ' : '○ ') + c.label + (isPin ? '  (pin)' : '  (slider)'), callback: function () { node._togglePinMode(j); } };
+        });
+        new LG.ContextMenu(sub, { event: e, parentMenu: menu, title: 'Input Modes' });
+      }
+    });
+    return items;
+  };
+
+  if (pinnable.length) {
+    Node.prototype._togglePinMode = function (ctrlIdx) {
+      const c = pinnable[ctrlIdx];
+      const modes = this.properties.pinModes = this.properties.pinModes || {};
+      const isPin = modes[c.uniform] === 'pin';
+      if (isPin) {
+        // Pin → Slider: remove pin, add widget
+        modes[c.uniform] = 'slider';
+        const inpIdx = (this.inputs || []).findIndex((s) => s._ctrlUniform === c.uniform);
+        if (inpIdx >= 0) { this.disconnectInput(inpIdx); this.removeInput(inpIdx); }
+        addSingleShaderWidget(this, c);
+      } else {
+        // Slider → Pin: remove widget, add pin
+        modes[c.uniform] = 'pin';
+        const wIdx = (this.widgets || []).findIndex((w) => w._uniform === c.uniform);
+        if (wIdx >= 0) this.widgets.splice(wIdx, 1);
+        this.addInput(c.label, 'number');
+        this.inputs[this.inputs.length - 1]._ctrlUniform = c.uniform;
+      }
+      // recalculate size
+      this.size = this.computeSize();
+      if (this.size[0] < 210) this.size[0] = 210;
+      this.size[1] += THUMB_H;
+      markDirty(this);
+    };
+  }
+
   LG.registerNodeType('forge/shader/' + def.key, Node);
 }
 
@@ -347,12 +437,17 @@ SequenceNode.prototype._render = async function () {
   const probe = this.getInputData(0);
   if (!probe || !probe.tex) return RT.toast('Connect an image', 'bad');
   const n = this.properties.frames, name = this.properties.name;
-  RT.capturing = true;
+  const fps = this.properties.fps || 24;
+  const savedTime = RT.time;
+  RT.capturing = true;          // the rAF loop yields; we own time + eval here
+  RT.advance = true;            // force feedback + animated shaders to step
   try {
     RT.engine.resetSim();                       // reseed all feedback sims
     await RT.api.seqClear(RT.project, name);
     for (let i = 0; i < n; i++) {
-      RT.evalOnce(true);                        // advance one frame
+      RT.time = i / fps;                        // advance time so animated shaders move
+      RT.dt = 1 / fps;
+      RT.evalOnce();                            // re-render every node at this time (one feedback step)
       const h = this.getInputData(0);
       const blob = await RT.engine.captureTexture(h.tex, h.size || RT.RENDER_SIZE);
       await RT.api.seqFrame(RT.project, name, i, blob);
@@ -362,7 +457,7 @@ SequenceNode.prototype._render = async function () {
     this._status = `rendered ${n} frames`;
     RT.toast(`Rendered ${n} frames`, 'good');
   } catch (e) { RT.toast('Sequence failed: ' + e.message, 'bad'); }
-  finally { RT.capturing = false; }
+  finally { RT.capturing = false; RT.time = savedTime; }
 };
 SequenceNode.prototype._video = async function () {
   try {
@@ -377,11 +472,12 @@ SequenceNode.prototype.onConfigure = function () { setWidget(this, 'fps', this.p
 // ── Math node (one per file in /mathnodes; outputs floats to drive shader pins) ──
 function makeMathNode(item) {
   const def = item.def;
+  const mathInputs = def.inputs || [];
   function Node() {
-    for (const inp of def.inputs || []) this.addInput(inp.name, 'number');
+    // inputs default to slider mode (no pin); toggle via right-click
     for (const o of def.outputs || []) this.addOutput(typeof o === 'string' ? o : o.name, 'number');
-    this.properties = { vals: {} };
-    for (const inp of def.inputs || []) {
+    this.properties = { vals: {}, pinModes: {} };
+    for (const inp of mathInputs) {
       if (this.properties.vals[inp.name] === undefined) this.properties.vals[inp.name] = inp.value ?? 0;
       this.addWidget('number', inp.name, this.properties.vals[inp.name],
         (v) => { this.properties.vals[inp.name] = v; RT.requestSave(); }, { step: inp.step ?? 0.1 });
@@ -389,17 +485,87 @@ function makeMathNode(item) {
     this.size = this.computeSize(); if (this.size[0] < 130) this.size[0] = 130;
   }
   Node.title = def.name || item.key;
-  Node.prototype.onConfigure = function () { for (const inp of def.inputs || []) setWidget(this, inp.name, this.properties.vals[inp.name]); };
+
+  Node.prototype.onConfigure = function () {
+    for (const inp of mathInputs) setWidget(this, inp.name, this.properties.vals[inp.name]);
+    const modes = this.properties.pinModes = this.properties.pinModes || {};
+    for (const inp of mathInputs) {
+      if (modes[inp.name] === 'pin') {
+        const wIdx = (this.widgets || []).findIndex((w) => w.name === inp.name);
+        if (wIdx >= 0) this.widgets.splice(wIdx, 1);
+        const inpIdx = (this.inputs || []).findIndex((s) => s.name === inp.name && s.type === 'number');
+        if (inpIdx >= 0) this.inputs[inpIdx]._ctrlName = inp.name;
+      } else {
+        // Slider mode: remove any leftover pin (backward compat)
+        const inpIdx = (this.inputs || []).findIndex((s) => s.name === inp.name && s.type === 'number');
+        if (inpIdx >= 0) { this.disconnectInput(inpIdx); this.removeInput(inpIdx); }
+      }
+    }
+  };
+
   Node.prototype.evaluate = function () {
     const i = {};
-    (def.inputs || []).forEach((inp, idx) => {
-      const v = this.getInputData(idx);
+    const modes = this.properties.pinModes || {};
+    mathInputs.forEach((inp) => {
+      let v;
+      if (modes[inp.name] === 'pin') {
+        const pinIdx = (this.inputs || []).findIndex((s) => s._ctrlName === inp.name);
+        if (pinIdx >= 0) v = this.getInputData(pinIdx);
+      }
       i[inp.name] = (typeof v === 'number' && !isNaN(v)) ? v : this.properties.vals[inp.name];
     });
     let out = {};
     try { out = def.compute(i, { time: RT.time, dt: RT.dt || 0, frame: RT.frame }) || {}; } catch (e) {}
     (def.outputs || []).forEach((o, idx) => this.setOutputData(idx, out[typeof o === 'string' ? o : o.name]));
   };
+
+  // ── right-click toggle: pin ↔ slider for each math input ──
+  if (mathInputs.length) {
+    Node.prototype.getExtraMenuOptions = function () {
+      const node = this;
+      const modes = this.properties.pinModes || {};
+      return [{
+        content: 'Input Modes',
+        has_submenu: true,
+        callback: function (_v, _opts, e, menu) {
+          const items = mathInputs.map((inp, j) => {
+            const isPin = modes[inp.name] === 'pin';
+            return {
+              content: (isPin ? '● ' : '○ ') + inp.name + (isPin ? '  (pin)' : '  (slider)'),
+              callback: function () { node._togglePinMode(j); }
+            };
+          });
+          new LG.ContextMenu(items, { event: e, parentMenu: menu, title: 'Input Modes' });
+        }
+      }];
+    };
+
+    Node.prototype._togglePinMode = function (inputIdx) {
+      const inp = mathInputs[inputIdx];
+      const modes = this.properties.pinModes = this.properties.pinModes || {};
+      const isPin = modes[inp.name] === 'pin';
+      if (isPin) {
+        // Pin → Slider: remove pin, add widget
+        modes[inp.name] = 'slider';
+        const idx = (this.inputs || []).findIndex((s) => s._ctrlName === inp.name);
+        if (idx >= 0) { this.disconnectInput(idx); this.removeInput(idx); }
+        this.addWidget('number', inp.name, this.properties.vals[inp.name] ?? inp.value ?? 0,
+          (v) => { this.properties.vals[inp.name] = v; RT.requestSave(); }, { step: inp.step ?? 0.1 });
+      } else {
+        // Slider → Pin: remove widget, add pin
+        modes[inp.name] = 'pin';
+        const wIdx = (this.widgets || []).findIndex((w) => w.name === inp.name);
+        if (wIdx >= 0) this.widgets.splice(wIdx, 1);
+        this.addInput(inp.name, 'number');
+        this.inputs[this.inputs.length - 1]._ctrlName = inp.name;
+      }
+      // recalculate size
+      this.size = this.computeSize();
+      if (this.size[0] < 130) this.size[0] = 130;
+      markDirty(this);
+    };
+  }
+
   LG.registerNodeType('math/' + item.key, Node);
 }
 

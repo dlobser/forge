@@ -3,10 +3,12 @@
 // Feed it into the Distort node (or noise's distort) to push UVs along the field.
 export default {
   name: "SDF",
-  inputs: [],
+  inputs: ["distort"],
+  inputLabels: { distort: "distort" },
   controls: [
     { uniform: "uShape", label: "Shape", type: "select", value: 0,
       options: [{ label: "Circle", value: 0 }, { label: "Square", value: 1 }, { label: "Triangle", value: 2 }, { label: "Torus", value: 3 }] },
+    { uniform: "uDistortAmt", label: "Distort In", type: "range", min: -20, max: 20, step: 0.005, value: 0 },
     { uniform: "uCenterX", label: "Center X",    type: "range", min: 0, max: 1, step: 0.005, value: 0.5 },
     { uniform: "uCenterY", label: "Center Y",    type: "range", min: 0, max: 1, step: 0.005, value: 0.5 },
     { uniform: "uScale",   label: "Scale",       type: "range", min: 0.05, max: 2, step: 0.005, value: 0.4 },

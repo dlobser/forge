@@ -97,10 +97,17 @@ export class ShaderEngine {
   }
 
   // allocate a node's own RGBA8 output texture
+  // A node's own output texture. RGBA16F (half-float) so gradients keep their
+  // precision through a chain of shaders instead of re-quantising to 8 bit at every
+  // pass (and it can hold values <0 / >1, e.g. Sine Wave). Falls back to RGBA8 if
+  // float render targets aren't supported. RGBA16F is linearly filterable in WebGL2.
   allocTexture(size) {
     const gl = this.gl, t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    if (this.floatRenderable)
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, size, size, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    else
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);

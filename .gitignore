@@ -19,6 +19,7 @@ __pycache__/
 $RECYCLE.BIN/
 Thumbs.db
 .DS_Store
+projects/*/
 
 # ==========================================
 # Local Editor & AI Tooling Configurations

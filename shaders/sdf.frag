@@ -5,6 +5,8 @@ precision highp float;
 in vec2 vUv;
 out vec4 fragColor;
 uniform vec2  uResolution;
+uniform sampler2D uDistort;   // optional: warps the field UVs along its luminance gradient
+uniform float uDistortAmt;
 uniform float uShape;
 uniform float uCenterX;
 uniform float uCenterY;
@@ -24,8 +26,14 @@ float sdTriangle(vec2 p) {
 }
 
 void main() {
+    // optional warp: push the field UVs along the gradient of the distort input
+    vec3 W = vec3(0.299, 0.587, 0.114);
+    vec2 ge = 1.5 / uResolution;
+    float gx = dot(texture(uDistort, vUv + vec2(ge.x, 0.0)).rgb, W) - dot(texture(uDistort, vUv - vec2(ge.x, 0.0)).rgb, W);
+    float gy = dot(texture(uDistort, vUv + vec2(0.0, ge.y)).rgb, W) - dot(texture(uDistort, vUv - vec2(0.0, ge.y)).rgb, W);
+    vec2 wuv = vUv + vec2(gx, gy) * uDistortAmt;
     float s = max(uScale, 1e-3);
-    vec2 p = (vUv - vec2(uCenterX, uCenterY)) / s;
+    vec2 p = (wuv - vec2(uCenterX, uCenterY)) / s;
     float d;
     if (uShape < 0.5) {
         d = length(p);                                    // circle

@@ -174,16 +174,33 @@ function resizeCanvas(canvas) {
     catch (e2) { toast('Save failed', 'bad'); }
   };
 
+  // global play / pause (freezes time + feedback; edits still re-render)
+  const playBtn = $('playBtn');
+  const updatePlay = () => { playBtn.textContent = RT.playing ? '⏸' : '▶'; playBtn.title = RT.playing ? 'Pause' : 'Play'; };
+  playBtn.onclick = () => { RT.playing = !RT.playing; updatePlay(); };
+  updatePlay();
+
+  // settings: default render size (persisted in localStorage)
+  const setPanel = $('settingsPanel');
+  $('settingsBtn').onclick = () => { setPanel.hidden = !setPanel.hidden; };
+  const rsSel = $('defaultRenderSize');
+  rsSel.value = String(RT.RENDER_SIZE);
+  rsSel.onchange = () => { RT.RENDER_SIZE = +rsSel.value || 512; localStorage.setItem('forge.graph.renderSize', String(RT.RENDER_SIZE)); toast('Default render size: ' + RT.RENDER_SIZE); };
+
   // comfy is checked once on boot (and again when an AI node is created); no polling
   pollComfy();
 
-  // the single render/eval loop
+  // the single render/eval loop — time accumulates only while playing, so pause
+  // freezes time-driven shaders and feedback sims (RT.advance gates the nodes).
   let lastT = performance.now();
   function frame() {
     const now = performance.now();
-    RT.dt = (now - lastT) / 1000; lastT = now;
-    RT.time = (now - t0) / 1000; RT.frame++;
-    if (!RT.capturing) evalOnce(true);
+    RT.dt = Math.min((now - lastT) / 1000, 0.1); lastT = now;
+    if (!RT.capturing) {                 // during sequence capture the node owns time/eval
+      if (RT.playing) { RT.time += RT.dt; RT.frame++; }
+      RT.advance = RT.playing;
+      evalOnce();
+    }
     try { RT.graphcanvas.draw(true, true); } catch (e) {}
     requestAnimationFrame(frame);
   }
