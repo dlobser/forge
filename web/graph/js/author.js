@@ -103,3 +103,256 @@ function openPanel() {
 // wire the topbar button (DOM is ready: this module is deferred)
 const btn = $('authorUiBtn');
 if (btn) btn.onclick = openPanel;
+
+// ── Context Menu Patch ────────────────────────────────────────────────────────
+if (window.LiteGraph && window.LiteGraph.LGraphCanvas) {
+  const origGetNodeMenuOptions = window.LiteGraph.LGraphCanvas.prototype.getNodeMenuOptions;
+  
+  const getEndUserConfig = () => {
+    if (!RT.graph) return { title: '', controls: [], previews: [] };
+    return (RT.graph.extra && RT.graph.extra.endUser) || { title: '', controls: [], previews: [] };
+  };
+
+  const saveEndUserConfig = (cfg) => {
+    if (!RT.graph) return;
+    RT.graph.extra = RT.graph.extra || {};
+    RT.graph.extra.endUser = cfg;
+    RT.requestSave();
+    RT.redraw();
+  };
+
+  const getWidgetAtPos = (node, canvasX, canvasY) => {
+    if (!node.widgets || !node.widgets.length) return null;
+    const localX = canvasX - node.pos[0];
+    const localY = canvasY - node.pos[1];
+    const width = node.size[0];
+    for (const w of node.widgets) {
+      if (!w || w.disabled || w.last_y === undefined) continue;
+      let widget_height = window.LiteGraph.NODE_WIDGET_HEIGHT;
+      if (w.computeSize) {
+        try {
+          const sz = w.computeSize(width);
+          if (sz && sz[1] !== undefined) widget_height = sz[1];
+        } catch (e) {}
+      }
+      const widget_width = w.width || width;
+      if (localX >= 6 && localX <= widget_width - 12 && localY >= w.last_y && localY <= w.last_y + widget_height) {
+        return w;
+      }
+    }
+    return null;
+  };
+
+  window.LiteGraph.LGraphCanvas.prototype.getNodeMenuOptions = function(node) {
+    let options = origGetNodeMenuOptions.call(this, node);
+    if (!node) return options;
+
+    const canvasX = this.graph_mouse[0];
+    const canvasY = this.graph_mouse[1];
+    const clickedWidget = getWidgetAtPos(node, canvasX, canvasY);
+    const extraOptions = [];
+
+    if (clickedWidget) {
+      const cfg = getEndUserConfig();
+      const idx = (cfg.controls || []).findIndex((c) => c.nodeId === node.id && c.widget === clickedWidget.name);
+      if (idx >= 0) {
+        extraOptions.push({
+          content: `✏️ Edit "${clickedWidget.name}" UI settings...`,
+          callback: function() {
+            const currentCfg = getEndUserConfig();
+            const cIdx = (currentCfg.controls || []).findIndex((c) => c.nodeId === node.id && c.widget === clickedWidget.name);
+            if (cIdx < 0) return;
+            const existing = currentCfg.controls[cIdx];
+            const cat = prompt("Category for this control:", existing.category);
+            if (cat === null) return;
+            const label = prompt("Label for this control:", existing.label);
+            if (label === null) return;
+            existing.category = cat.trim() || 'Controls';
+            existing.label = label.trim() || clickedWidget.name;
+            saveEndUserConfig(currentCfg);
+            RT.toast && RT.toast("Updated control settings", "good");
+          }
+        });
+        extraOptions.push({
+          content: `❌ Unexpose "${clickedWidget.name}" from UI`,
+          callback: function() {
+            const currentCfg = getEndUserConfig();
+            const cIdx = (currentCfg.controls || []).findIndex((c) => c.nodeId === node.id && c.widget === clickedWidget.name);
+            if (cIdx >= 0) {
+              currentCfg.controls.splice(cIdx, 1);
+              saveEndUserConfig(currentCfg);
+              RT.toast && RT.toast("Removed control from end-user UI", "good");
+            }
+          }
+        });
+      } else {
+        extraOptions.push({
+          content: `➕ Expose "${clickedWidget.name}" to End-user UI`,
+          callback: function() {
+            const nodeTitleVal = node.title || node.type || ('node ' + node.id);
+            const cat = prompt("Category for this control:", nodeTitleVal);
+            if (cat === null) return;
+            const label = prompt("Label for this control:", clickedWidget.name);
+            if (label === null) return;
+            
+            const currentCfg = getEndUserConfig();
+            currentCfg.controls = currentCfg.controls || [];
+            currentCfg.controls.push({
+              kind: 'widget',
+              nodeId: node.id,
+              widget: clickedWidget.name,
+              category: cat.trim() || 'Controls',
+              label: label.trim() || clickedWidget.name
+            });
+            saveEndUserConfig(currentCfg);
+            RT.toast && RT.toast("Exposed control to end-user UI", "good");
+          }
+        });
+      }
+    }
+
+    // Build the "★ End-user UI" submenu
+    const subItems = [];
+    
+    // 1. Expose Widget submenu option
+    subItems.push({
+      content: "Expose Widget",
+      has_submenu: true,
+      callback: function(v, opts, ev, parentMenu) {
+        if (!node.widgets || !node.widgets.length) {
+          new window.LiteGraph.ContextMenu([{ content: "(No widgets)", disabled: true }], {
+            event: ev,
+            parentMenu: parentMenu,
+            title: "Expose Widget"
+          });
+          return;
+        }
+        const cfg = getEndUserConfig();
+        const widgetItems = node.widgets.map((w) => {
+          const idx = (cfg.controls || []).findIndex((c) => c.nodeId === node.id && c.widget === w.name);
+          const isExp = idx >= 0;
+          return {
+            content: (isExp ? "● " : "○ ") + w.name,
+            callback: function() {
+              if (isExp) {
+                const action = confirm(`"${w.name}" is already exposed.\n\nClick OK to edit Category/Label, or Cancel to unexpose it.`);
+                if (action) {
+                  const cat = prompt("Category:", cfg.controls[idx].category);
+                  if (cat === null) return;
+                  const label = prompt("Label:", cfg.controls[idx].label);
+                  if (label === null) return;
+                  cfg.controls[idx].category = cat.trim() || 'Controls';
+                  cfg.controls[idx].label = label.trim() || w.name;
+                  saveEndUserConfig(cfg);
+                  RT.toast && RT.toast("Updated control settings", "good");
+                } else {
+                  cfg.controls.splice(idx, 1);
+                  saveEndUserConfig(cfg);
+                  RT.toast && RT.toast("Removed control from end-user UI", "good");
+                }
+              } else {
+                const nodeTitleVal = node.title || node.type || ('node ' + node.id);
+                const cat = prompt("Category for this control:", nodeTitleVal);
+                if (cat === null) return;
+                const label = prompt("Label for this control:", w.name);
+                if (label === null) return;
+                cfg.controls = cfg.controls || [];
+                cfg.controls.push({
+                  kind: 'widget',
+                  nodeId: node.id,
+                  widget: w.name,
+                  category: cat.trim() || 'Controls',
+                  label: label.trim() || w.name
+                });
+                saveEndUserConfig(cfg);
+                RT.toast && RT.toast("Exposed control to end-user UI", "good");
+              }
+            }
+          };
+        });
+        new window.LiteGraph.ContextMenu(widgetItems, {
+          event: ev,
+          parentMenu: parentMenu,
+          title: "Expose Widget"
+        });
+      }
+    });
+
+    // 2. Preview options if it is a ViewerNode
+    if (node.type === 'forge/viewer') {
+      const cfg = getEndUserConfig();
+      const pIdx = (cfg.previews || []).findIndex((p) => p.nodeId === node.id);
+      const isExpPrev = pIdx >= 0;
+      if (isExpPrev) {
+        subItems.push({
+          content: "✏️ Edit preview label...",
+          callback: function() {
+            const currentCfg = getEndUserConfig();
+            const idx = (currentCfg.previews || []).findIndex((p) => p.nodeId === node.id);
+            if (idx < 0) return;
+            const label = prompt("Preview window label:", currentCfg.previews[idx].label);
+            if (label !== null) {
+              currentCfg.previews[idx].label = label.trim();
+              saveEndUserConfig(currentCfg);
+              RT.toast && RT.toast("Updated preview label", "good");
+            }
+          }
+        });
+        subItems.push({
+          content: "❌ Remove from previews",
+          callback: function() {
+            const currentCfg = getEndUserConfig();
+            const idx = (currentCfg.previews || []).findIndex((p) => p.nodeId === node.id);
+            if (idx >= 0) {
+              currentCfg.previews.splice(idx, 1);
+              saveEndUserConfig(currentCfg);
+              RT.toast && RT.toast("Removed viewer from previews", "good");
+            }
+          }
+        });
+      } else {
+        subItems.push({
+          content: "➕ Add as preview window",
+          callback: function() {
+            const label = prompt("Preview window label:", node.title || 'Preview');
+            if (label !== null) {
+              const currentCfg = getEndUserConfig();
+              currentCfg.previews = currentCfg.previews || [];
+              currentCfg.previews.push({
+                nodeId: node.id,
+                label: label.trim()
+              });
+              saveEndUserConfig(currentCfg);
+              RT.toast && RT.toast("Added viewer as end-user preview", "good");
+            }
+          }
+        });
+      }
+    }
+
+    subItems.push(null); // separator
+    subItems.push({
+      content: "Open published view ↗",
+      callback: function() {
+        window.open('/web/graph/play.html?project=' + encodeURIComponent(RT.project), '_blank');
+      }
+    });
+
+    extraOptions.push({
+      content: "★ End-user UI",
+      has_submenu: true,
+      callback: function(v, opts, ev, parentMenu) {
+        new window.LiteGraph.ContextMenu(subItems, {
+          event: ev,
+          parentMenu: parentMenu,
+          title: "End-user UI"
+        });
+      }
+    });
+
+    extraOptions.push(null); // separator
+    options = extraOptions.concat(options);
+
+    return options;
+  };
+}
