@@ -482,6 +482,16 @@ function makeMathNode(item) {
       this.addWidget('number', inp.name, this.properties.vals[inp.name],
         (v) => { this.properties.vals[inp.name] = v; RT.requestSave(); }, { step: inp.step ?? 0.1 });
     }
+    // honour defaultPin: start marked inputs in pin mode
+    for (const inp of mathInputs) {
+      if (inp.defaultPin) {
+        this.properties.pinModes[inp.name] = 'pin';
+        const wIdx = (this.widgets || []).findIndex((w) => w.name === inp.name);
+        if (wIdx >= 0) this.widgets.splice(wIdx, 1);
+        this.addInput(inp.name, 'number');
+        this.inputs[this.inputs.length - 1]._ctrlName = inp.name;
+      }
+    }
     this.size = this.computeSize(); if (this.size[0] < 130) this.size[0] = 130;
   }
   Node.title = def.name || item.key;
@@ -569,6 +579,69 @@ function makeMathNode(item) {
   LG.registerNodeType('math/' + item.key, Node);
 }
 
+// ── Pass Through (a node that does nothing, passing the IMAGE texture directly) ──
+function PassThroughNode() {
+  this.addInput('image', IMG);
+  this.addOutput('out', IMG);
+  this.size = [140, 40];
+}
+PassThroughNode.title = 'Pass Through';
+PassThroughNode.prototype.evaluate = function () {
+  this.setOutputData(0, this.getInputData(0));
+};
+
+function insertPassThrough(node) {
+  const graph = node.graph;
+  if (!graph) return;
+
+  const ptNode = LG.createNode('forge/pass_through');
+  if (!ptNode) return;
+
+  // Position it slightly to the left of the target node
+  ptNode.pos = [node.pos[0] - 180, node.pos[1]];
+  graph.add(ptNode);
+
+  // If the target node has an input connected, splice the pass-through in
+  const linkId = node.inputs[0].link;
+  if (linkId !== null && linkId !== undefined) {
+    const link = graph.links[linkId];
+    if (link) {
+      const originNodeId = link.origin_id;
+      const originSlot = link.origin_slot;
+
+      // Disconnect target node's input
+      node.disconnectInput(0);
+
+      // Connect origin node to pass-through's input
+      const originNode = graph.getNodeById(originNodeId);
+      if (originNode) {
+        originNode.connect(originSlot, ptNode, 0);
+      }
+    }
+  }
+
+  // Connect pass-through's output to target node's input
+  ptNode.connect(0, node, 0);
+
+  // Request save and redraw
+  RT.requestSave();
+  RT.redraw();
+}
+
+function getOutputNodeMenuOptions() {
+  const node = this;
+  return [{
+    content: 'Insert Pass Through',
+    callback: function () {
+      insertPassThrough(node);
+    }
+  }];
+}
+
+ViewerNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
+SaveNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
+SequenceNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
+
 // ── registration ────────────────────────────────────────────────────────────────
 export function registerNodes() {
   LG.registerNodeType('forge/source', SourceNode);
@@ -578,6 +651,7 @@ export function registerNodes() {
   LG.registerNodeType('forge/viewer', ViewerNode);
   LG.registerNodeType('forge/save', SaveNode);
   LG.registerNodeType('forge/sequence', SequenceNode);
+  LG.registerNodeType('forge/pass_through', PassThroughNode);
   for (const def of RT.shaderDefs) makeShaderNode(def);
   for (const wf of RT.workflows) makeAiNode(wf);
   for (const m of RT.mathDefs) makeMathNode(m);
