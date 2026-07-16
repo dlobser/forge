@@ -1,5 +1,5 @@
 // nodes.js — the Forge Graph node catalog. Image data flows along IMAGE slots as a
-// handle { tex, size, version }. Shader nodes render into their own texture each
+// handle { tex, width, height, version }. Shader nodes render into their own texture each
 // time inputs/params change (feedback nodes every frame); Source/Import/Depth/AI
 // nodes expose a (cached) image texture; Viewer/Save/Sequence consume. graphApp's
 // rAF loop calls node.evaluate(RT) in topological order.
@@ -26,9 +26,9 @@ const setWidget = (node, name, value) => { const w = (node.widgets || []).find((
 function drawImage(node, ctx, tex, a) {
   ctx.fillStyle = '#0a0c0f'; ctx.fillRect(a.x, a.y, a.w, a.h);
   if (!tex) return;
-  RT.engine.blitToCanvas(tex, 256);
-  const s = Math.min(a.w, a.h);
-  try { ctx.drawImage(RT.engine.canvas, a.x + (a.w - s) / 2, a.y + (a.h - s) / 2, s, s); } catch (e) {}
+  const out = node._out || {}, w = out.width || RT.RENDER_SIZE, h = out.height || RT.RENDER_SIZE; RT.engine.blitToCanvas(tex, w, h);
+  const s = Math.min(a.w / w, a.h / h), dw = w * s, dh = h * s;
+  try { ctx.drawImage(RT.engine.canvas, a.x + (a.w - dw) / 2, a.y + (a.h - dh) / 2, dw, dh); } catch (e) {}
 }
 function attachThumb(node) {
   node.onDrawForeground = function (ctx) {
@@ -45,22 +45,31 @@ function sizeWithThumb(node) {
   if (node.size[0] < 210) node.size[0] = 210;
   node.size[1] += THUMB_H;
 }
-const nodeRenderSize = (node) => (node.properties && +node.properties.renderSize) || RT.RENDER_SIZE;
+const imageSize = (h) => ({ width: (h && h.width) || RT.RENDER_SIZE, height: (h && h.height) || RT.RENDER_SIZE });
+const nodeRenderSize = (node, input) => {
+  const fallback = imageSize(input);
+  return {
+    width: (node.properties && (+node.properties.renderWidth || +node.properties.renderSize)) || fallback.width,
+    height: (node.properties && (+node.properties.renderHeight || +node.properties.renderSize)) || fallback.height,
+  };
+};
 function ensureOut(node) {
   // node._size is the desired render resolution; realloc the texture if it changed
-  if (node._out && node._out.size !== node._size) { RT.engine.gl.deleteTexture(node._out.tex); node._out = null; }
-  if (!node._out) node._out = { tex: RT.engine.allocTexture(node._size), size: node._size, version: 0 };
+  if (node._out && (node._out.width !== node._size.width || node._out.height !== node._size.height)) { RT.engine.gl.deleteTexture(node._out.tex); node._out = null; }
+  if (!node._out) node._out = { tex: RT.engine.allocTexture(node._size.width, node._size.height), width: node._size.width, height: node._size.height, version: 0 };
   return node._out;
 }
 function setImageOut(node, img) {
   node._tex = RT.engine.texFor(img);
-  node._out = node._out || { size: RT.RENDER_SIZE, version: 0 };
-  node._out.tex = node._tex; node._out.version++;
+  const width = img.naturalWidth || img.width || RT.RENDER_SIZE, height = img.naturalHeight || img.height || RT.RENDER_SIZE;
+  node._out = node._out || { version: 0 };
+  node._out.tex = node._tex; node._out.width = width; node._out.height = height; node._out.version++;
   node._status = null; RT.redraw();
 }
 
-function openFull(tex) {
-  RT.engine.captureTexture(tex, 1024).then((blob) => {
+function openFull(tex, size) {
+  const s = imageSize(size);
+  RT.engine.captureTexture(tex, s.width, s.height).then((blob) => {
     const url = URL.createObjectURL(blob);
     const ov = document.getElementById('viewerOverlay'), img = document.getElementById('viewerImg');
     img.src = url; ov.hidden = false;
@@ -118,16 +127,29 @@ ImportNode.prototype.onConfigure = function () { setWidget(this, 'reformat → s
 ImportNode.prototype.evaluate = function () { if (this._out && this._out.tex) this.setOutputData(0, this._out); };
 
 // ── Crop / Scale (set output resolution) ───────────────────────────────────────
+const ASPECT_SIZES = { '1:1': [1024, 1024], '16:9': [1920, 1080], '9:16': [1080, 1920], '4:3': [1024, 768], '3:4': [768, 1024] };
 function CropScaleNode() {
   this.addInput('image', IMG); this.addOutput('out', IMG);
-  this.properties = { size: 1024 };
-  this.addWidget('combo', 'size', this.properties.size, (v) => { this.properties.size = +v; this._realloc(); RT.requestSave(); }, { values: [256, 512, 1024, 2048] });
-  this._size = +this.properties.size; this._dirty = true;
+  this.properties = { aspect: 'custom', width: 1024, height: 1024 };
+  this.addWidget('combo', 'aspect', this.properties.aspect, (v) => {
+    this.properties.aspect = v;
+    const preset = ASPECT_SIZES[v];
+    if (preset) [this.properties.width, this.properties.height] = preset;
+    setWidget(this, 'width', this.properties.width); setWidget(this, 'height', this.properties.height);
+    this._realloc(); RT.requestSave();
+  }, { values: ['1:1', '16:9', '9:16', '4:3', '3:4', 'custom'] });
+  this.addWidget('number', 'width', this.properties.width, (v) => { this.properties.width = Math.max(64, Math.round(v)); this.properties.aspect = 'custom'; setWidget(this, 'aspect', 'custom'); this._realloc(); RT.requestSave(); }, { min: 64, max: 8192, step: 1 });
+  this.addWidget('number', 'height', this.properties.height, (v) => { this.properties.height = Math.max(64, Math.round(v)); this.properties.aspect = 'custom'; setWidget(this, 'aspect', 'custom'); this._realloc(); RT.requestSave(); }, { min: 64, max: 8192, step: 1 });
+  this._size = { width: this.properties.width, height: this.properties.height }; this._dirty = true;
   attachThumb(this); sizeWithThumb(this);
 }
 CropScaleNode.title = 'Crop / Scale';
-CropScaleNode.prototype._realloc = function () { if (this._out && this._out.tex) RT.engine.gl.deleteTexture(this._out.tex); this._out = null; this._size = +this.properties.size; this._dirty = true; };
-CropScaleNode.prototype.onConfigure = function () { this._size = +this.properties.size || 1024; this._dirty = true; setWidget(this, 'size', this.properties.size); };
+CropScaleNode.prototype._realloc = function () { if (this._out && this._out.tex) RT.engine.gl.deleteTexture(this._out.tex); this._out = null; this._size = { width: +this.properties.width || 1024, height: +this.properties.height || 1024 }; this._dirty = true; };
+CropScaleNode.prototype.onConfigure = function () {
+  this.properties.aspect = this.properties.aspect || 'custom';
+  this._size = { width: +this.properties.width || 1024, height: +this.properties.height || 1024 }; this._dirty = true;
+  setWidget(this, 'aspect', this.properties.aspect); setWidget(this, 'width', this._size.width); setWidget(this, 'height', this._size.height);
+};
 CropScaleNode.prototype.evaluate = function () {
   const h = this.getInputData(0);
   const v = h && h.tex ? (h.version | 0) : -1;
@@ -135,7 +157,7 @@ CropScaleNode.prototype.evaluate = function () {
     this._inV = v;
     ensureOut(this);
     if (h && h.tex) {
-      RT.engine.renderToTexture({ key: '__cropscale', vertSrc: CP_VERT, fragSrc: CP_FRAG, inputs: ['color'], inputTextures: { color: h.tex }, controls: [] }, this._out.tex, this._size);
+      RT.engine.renderToTexture({ key: '__cropscale', vertSrc: CP_VERT, fragSrc: CP_FRAG, inputs: ['color'], inputTextures: { color: h.tex }, controls: [] }, this._out.tex, this._size.width, this._size.height);
       this._out.version++;
     }
     this._dirty = false;
@@ -163,7 +185,7 @@ function makeShaderNode(def) {
       // time-driven (non-feedback) shaders: an explicit animate toggle drives uTime
       this.addWidget('toggle', 'animate', !!this.properties.animate, (v) => { this.properties.animate = v; this._dirty = true; RT.requestSave(); });
     }
-    this._def = def; this._size = RT.RENDER_SIZE; this._dirty = true;
+    this._def = def; this._size = { width: RT.RENDER_SIZE, height: RT.RENDER_SIZE }; this._dirty = true;
     attachThumb(this); sizeWithThumb(this);
   }
   Node.title = def.name || def.key;
@@ -209,9 +231,10 @@ function makeShaderNode(def) {
     const feedback = !!def.feedback;
     // animate only while playing (RT.advance); edits still re-render via _dirty/pkey
     const animate = RT.advance && (feedback || (def.animated && this.properties.animate));
-    this._size = nodeRenderSize(this);
+    const firstInput = inputs.map((_name, i) => this.getInputData(i)).find((h) => h && h.tex);
+    this._size = nodeRenderSize(this, firstInput);
     const vkey = vers.join(',');
-    const pkey = JSON.stringify(params) + '|' + this.properties.simSize + '|' + (this._seed || 0) + '|' + (this.properties.animate ? 1 : 0) + '|' + this._size;
+    const pkey = JSON.stringify(params) + '|' + this.properties.simSize + '|' + (this._seed || 0) + '|' + (this.properties.animate ? 1 : 0) + '|' + this._size.width + 'x' + this._size.height;
     if (this._dirty || animate || vkey !== this._vkey || pkey !== this._pkey) {
       ensureOut(this);
       const simSize = +this.properties.simSize || def.simSize || 256;
@@ -221,27 +244,33 @@ function makeShaderNode(def) {
         inputs, inputTextures: inTex,
         feedback, simSize, simKey: 'n' + this.id, advance: feedback && RT.advance, time: RT.time,
         resetToken: 'n' + this.id + '|' + simSize + '|' + vkey + '|' + (this._seed || 0),
-      }, this._out.tex, this._size);
+      }, this._out.tex, this._size.width, this._size.height);
       this._out.version++;
       this._dirty = false; this._vkey = vkey; this._pkey = pkey;
     }
     this.setOutputData(0, this._out);
   };
-  Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this._out.tex); };
+  Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this._out.tex, this._out); };
 
   // ── right-click menu: render size, plus pin ↔ slider per control ──
   Node.prototype.getExtraMenuOptions = function () {
     const node = this;
     const modes = this.properties.pinModes || {};
+    const current = this._size || nodeRenderSize(this);
     const items = [{
-      content: 'Render size: ' + nodeRenderSize(this),
+      content: 'Render size: ' + current.width + ' × ' + current.height,
       has_submenu: true,
       callback: function (_v, _opts, e, menu) {
-        new LG.ContextMenu(['256', '512', '1024', '2048', '4096', 'custom…'], {
+        new LG.ContextMenu(['follow input', '512 × 512', '1024 × 1024', '1920 × 1080', '1080 × 1920', '2048 × 1024', '1024 × 2048', 'custom…'], {
           event: e, parentMenu: menu, callback: function (val) {
-            let s = parseInt(val, 10);
-            if (String(val).startsWith('custom')) s = parseInt(prompt('Render size (px):', String(nodeRenderSize(node))), 10);
-            if (s >= 64) { node.properties.renderSize = s; node._dirty = true; RT.requestSave(); RT.redraw(); }
+            if (val === 'follow input') { delete node.properties.renderWidth; delete node.properties.renderHeight; }
+            else {
+              let m = String(val).match(/(\d+)\s*[×x]\s*(\d+)/i);
+              if (String(val).startsWith('custom')) m = String(prompt('Render size (width x height):', current.width + 'x' + current.height) || '').match(/(\d+)\s*[×x]\s*(\d+)/i);
+              if (!m || +m[1] < 64 || +m[2] < 64) return;
+              node.properties.renderWidth = +m[1]; node.properties.renderHeight = +m[2];
+            }
+            delete node.properties.renderSize; node._dirty = true; RT.requestSave(); RT.redraw();
           }
         });
       }
@@ -311,7 +340,7 @@ DepthNode.prototype._schedule = function (h) {
 DepthNode.prototype._bake = async function (h) {
   try {
     this._status = 'depth…'; RT.redraw();
-    const blob = await RT.engine.captureTexture(h.tex, h.size || RT.RENDER_SIZE);
+    const s = imageSize(h); const blob = await RT.engine.captureTexture(h.tex, s.width, s.height);
     const saved = await RT.api.renderSave(RT.project, 'depth_in', blob, { graph: true, intermediate: true });
     const out = await RT.api.depth(RT.project, saved.filename);
     this.properties.output = out.filename; RT.requestSave(); RT.refreshGallery();
@@ -365,7 +394,7 @@ function makeAiNode(wf) {
       for (let i = 0; i < slots.length; i++) {
         const h = this.getInputData(i);
         if (h && h.tex) {
-          const blob = await RT.engine.captureTexture(h.tex, h.size || RT.RENDER_SIZE);
+          const s = imageSize(h); const blob = await RT.engine.captureTexture(h.tex, s.width, s.height);
           const saved = await RT.api.renderSave(RT.project, wf.key + '_in', blob, { graph: true, intermediate: true });
           images[slots[i].id] = saved.filename;
         }
@@ -381,7 +410,7 @@ function makeAiNode(wf) {
     } catch (e) { this._status = 'generate failed'; this._statusColor = '#ff6666'; RT.toast('Generate failed: ' + e.message, 'bad'); }
   };
   Node.prototype.evaluate = function () { if (this._out && this._out.tex) this.setOutputData(0, this._out); };
-  Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this._out.tex); };
+  Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this._out.tex, this._out); };
   LG.registerNodeType('forge/ai/' + wf.key, Node);
 }
 
@@ -390,7 +419,7 @@ function ViewerNode() {
   this.addInput('image', IMG);
   this.properties = {};
   this.size = [300, 300];
-  this.addWidget('button', '⤢ fullscreen', null, () => { if (this._tex) openFull(this._tex); });
+  this.addWidget('button', '⤢ fullscreen', null, () => { if (this._tex) openFull(this._tex, this._out); });
   this.onDrawForeground = function (ctx) {
     if (this.flags.collapsed) return;
     drawImage(this, ctx, this._tex, { x: 0, y: 30, w: this.size[0], h: this.size[1] - 30 });
@@ -398,8 +427,8 @@ function ViewerNode() {
 }
 ViewerNode.title = 'Viewer';
 ViewerNode.prototype.onResize = function () { if (this.size[1] < 120) this.size[1] = 120; };
-ViewerNode.prototype.evaluate = function () { const h = this.getInputData(0); this._tex = h && h.tex ? h.tex : null; };
-ViewerNode.prototype.onDblClick = function () { if (this._tex) openFull(this._tex); };
+ViewerNode.prototype.evaluate = function () { const h = this.getInputData(0); this._out = h || null; this._tex = h && h.tex ? h.tex : null; };
+ViewerNode.prototype.onDblClick = function () { if (this._tex) openFull(this._tex, this._out); };
 
 // ── Save ──────────────────────────────────────────────────────────────────────
 function SaveNode() {
@@ -414,7 +443,7 @@ SaveNode.prototype._save = async function () {
   const h = this.getInputData(0);
   if (!h || !h.tex) return RT.toast('Connect an image', 'bad');
   try {
-    const blob = await RT.engine.captureTexture(h.tex, h.size || RT.RENDER_SIZE);
+    const s = imageSize(h); const blob = await RT.engine.captureTexture(h.tex, s.width, s.height);
     const out = await RT.api.renderSave(RT.project, this.properties.name || 'graph', blob, { graph: true });
     RT.refreshGallery(); RT.toast('Saved ' + out.filename, 'good');
   } catch (e) { RT.toast('Save failed: ' + e.message, 'bad'); }
@@ -449,7 +478,7 @@ SequenceNode.prototype._render = async function () {
       RT.dt = 1 / fps;
       RT.evalOnce();                            // re-render every node at this time (one feedback step)
       const h = this.getInputData(0);
-      const blob = await RT.engine.captureTexture(h.tex, h.size || RT.RENDER_SIZE);
+      const s = imageSize(h); const blob = await RT.engine.captureTexture(h.tex, s.width, s.height);
       await RT.api.seqFrame(RT.project, name, i, blob);
       this._status = `frame ${i + 1}/${n}`; RT.redraw();
     }
