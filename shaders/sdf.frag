@@ -32,11 +32,16 @@ void main() {
     float gx = dot(texture(uDistort, vUv + vec2(ge.x, 0.0)).rgb, W) - dot(texture(uDistort, vUv - vec2(ge.x, 0.0)).rgb, W);
     float gy = dot(texture(uDistort, vUv + vec2(0.0, ge.y)).rgb, W) - dot(texture(uDistort, vUv - vec2(0.0, ge.y)).rgb, W);
     vec2 wuv = vUv + vec2(gx, gy) * uDistortAmt;
+
+    // real aspect-ratio correction (was claimed, never implemented)
+    float aspect = uResolution.x / max(uResolution.y, 1.0);
     float s = max(uScale, 1e-3);
     vec2 p = (wuv - vec2(uCenterX, uCenterY)) / s;
+    p.x *= aspect;
+
     float d;
     if (uShape < 0.5) {
-        d = length(p);                                    // circle
+        d = length(p) - 1.0;                              // circle: subtract 1 so d==0 lands on the boundary, not the centre
     } else if (uShape < 1.5) {
         vec2 q = abs(p) - vec2(1.0);                      // square (box, half-size 1)
         d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
@@ -45,6 +50,10 @@ void main() {
     } else {
         d = abs(length(p) - uRing / s);                   // torus / ring
     }
+
+    // scale back to real UV-space distance units
+    d *= s;
+
     float v = exp(-abs(d) * uDropoff);
     if (uInvert > 0.5) v = 1.0 - v;
     fragColor = vec4(vec3(v), 1.0);
