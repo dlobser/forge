@@ -6,7 +6,8 @@ Run:  python -m forge_server.server          ->  http://127.0.0.1:8191
       python -m forge_server.server --port N
 
 Layout served:
-    /              -> web/index.html
+    /              -> web/graph/index.html (node view, the default)
+    /classic       -> web/index.html (original chain view)
     /web/*         -> web/ (js, css)
     /shaders/*     -> shaders/ (the .vert/.frag/.js triplets, scanned + imported
                       directly by the browser)
@@ -386,6 +387,13 @@ def api_save_graph(req: GraphReq):
 # ── static front-end ─────────────────────────────────────────────────────────
 @app.get("/")
 def index():
+    # Forge is node-only going forward: the graph view is the default front-end.
+    return FileResponse(WEB_DIR / "graph" / "index.html")
+
+
+@app.get("/classic")
+def classic():
+    # The original chain-based UI, kept around but no longer the default.
     return FileResponse(WEB_DIR / "index.html")
 
 

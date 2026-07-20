@@ -4,9 +4,9 @@
     "port": 8188
   },
   "paths": {
-    "workflows_dir": "C:\\_Main\\ai\\QRI\\Workflows",
-    "projects_dir": "C:\\_Main\\ai\\QRI\\projects",
-    "shaders_dir": "C:\\_Main\\ai\\QRI\\shaders"
+    "workflows_dir": "C:\\_Main\\projects\\ai\\forge\\Workflows",
+    "projects_dir": "C:\\_Main\\projects\\ai\\forge\\projects",
+    "shaders_dir": "C:\\_Main\\projects\\ai\\forge\\shaders"
   },
   "depth": {
     "preprocessors": [

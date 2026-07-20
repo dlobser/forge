@@ -430,6 +430,74 @@ ViewerNode.prototype.onResize = function () { if (this.size[1] < 120) this.size[
 ViewerNode.prototype.evaluate = function () { const h = this.getInputData(0); this._out = h || null; this._tex = h && h.tex ? h.tex : null; };
 ViewerNode.prototype.onDblClick = function () { if (this._tex) openFull(this._tex, this._out); };
 
+// ── Viewer Window (live output in a separate, fullscreen-able window) ───────────
+// Opens a same-origin popup with its own 2D canvas. Each frame we blit this node's
+// texture into the shared gl canvas and drawImage() it into the popup — so the
+// window shows a live feed you can drag to a second display and take fullscreen.
+const VIEWER_WIN_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Forge Viewer</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;cursor:none;}
+  body.ui{cursor:default;}
+  #v{display:block;width:100vw;height:100vh;}
+  #bar{position:fixed;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:10px;
+    align-items:center;padding:6px 10px;background:#000b;border:1px solid #333;border-radius:8px;
+    font:12px -apple-system,Segoe UI,sans-serif;color:#cfd3d8;opacity:0;transition:opacity .2s;pointer-events:none;}
+  body.ui #bar{opacity:1;pointer-events:auto;}
+  #bar button{background:#1c2028;color:#eee;border:1px solid #333;border-radius:6px;padding:5px 11px;cursor:pointer;}
+  #bar .hint{color:#8a929c;}
+</style></head><body>
+<canvas id="v"></canvas>
+<div id="bar"><button id="fs">⤢ Fullscreen</button><span class="hint">double-click or press F · drag to another display first</span></div>
+<script>
+  var body=document.body;
+  function fs(){ if(document.fullscreenElement){document.exitFullscreen();} else {document.documentElement.requestFullscreen().catch(function(){});} }
+  document.getElementById('fs').onclick=fs;
+  document.addEventListener('dblclick',fs);
+  document.addEventListener('keydown',function(e){ if(e.key==='f'||e.key==='F'){fs();} });
+  var t; function ui(){ body.classList.add('ui'); clearTimeout(t); t=setTimeout(function(){body.classList.remove('ui');},2000); }
+  document.addEventListener('mousemove',ui); ui();
+</script>
+</body></html>`;
+
+function ViewerWindowNode() {
+  this.addInput('image', IMG);
+  this.properties = {};
+  this.addWidget('button', '⧉ Open window', null, () => this._open());
+  attachThumb(this); this.size = [220, 70 + THUMB_H];
+}
+ViewerWindowNode.title = 'Viewer Window';
+ViewerWindowNode.prototype._open = function () {
+  if (this._win && !this._win.closed) { this._win.focus(); return; }
+  const w = window.open('', 'forge-viewer-' + this.id, 'width=960,height=960');
+  if (!w) { RT.toast('Popup blocked — allow popups for Forge', 'bad'); return; }
+  w.document.open(); w.document.write(VIEWER_WIN_HTML); w.document.close();
+  this._win = w;
+  this._canvas = w.document.getElementById('v');
+  this._ctx = this._canvas && this._canvas.getContext('2d');
+  this._status = '● window open'; this._statusColor = '#37d0a0'; RT.redraw();
+  w.addEventListener('beforeunload', () => { if (this._win === w) { this._win = null; this._canvas = null; this._ctx = null; this._status = 'window closed'; this._statusColor = '#8a929c'; RT.redraw(); } });
+};
+ViewerWindowNode.prototype._push = function () {
+  const w = this._win; if (!w || w.closed || !this._ctx) return;
+  const cvs = this._canvas, ctx = this._ctx;
+  const dw = w.innerWidth | 0, dh = w.innerHeight | 0;
+  if (!dw || !dh) return;
+  if (cvs.width !== dw || cvs.height !== dh) { cvs.width = dw; cvs.height = dh; }
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, dw, dh);
+  if (!this._tex) return;
+  RT.engine.blitToCanvas(this._tex, this._texSize || 1024);
+  const s = Math.min(dw, dh);   // square texture, letterboxed to the window
+  try { ctx.drawImage(RT.engine.canvas, (dw - s) / 2, (dh - s) / 2, s, s); } catch (e) {}
+};
+ViewerWindowNode.prototype.evaluate = function () {
+  const h = this.getInputData(0);
+  this._tex = h && h.tex ? h.tex : null;
+  this._texSize = h && h.size ? h.size : (this._texSize || 512);
+  if (this._win) this._push();
+};
+ViewerWindowNode.prototype.onRemoved = function () { if (this._win && !this._win.closed) this._win.close(); this._win = null; };
+ViewerWindowNode.prototype.onDblClick = function () { this._open(); };
+
 // ── Save ──────────────────────────────────────────────────────────────────────
 function SaveNode() {
   this.addInput('image', IMG);
@@ -668,6 +736,7 @@ function getOutputNodeMenuOptions() {
 }
 
 ViewerNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
+ViewerWindowNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
 SaveNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
 SequenceNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
 
@@ -678,6 +747,7 @@ export function registerNodes() {
   LG.registerNodeType('forge/crop_scale', CropScaleNode);
   LG.registerNodeType('forge/depth', DepthNode);
   LG.registerNodeType('forge/viewer', ViewerNode);
+  LG.registerNodeType('forge/viewer_window', ViewerWindowNode);
   LG.registerNodeType('forge/save', SaveNode);
   LG.registerNodeType('forge/sequence', SequenceNode);
   LG.registerNodeType('forge/pass_through', PassThroughNode);
