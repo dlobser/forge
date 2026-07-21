@@ -1,11 +1,12 @@
 #version 300 es
 // raymarch — ray-marches a heightfield built directly from the input image.
-// Image brightness at each (x,z) position becomes elevation. The input is the
-// terrain being rendered, rather than a cosmetic distortion of another shape.
+// Height map brightness at each (x,z) position becomes elevation. A separate
+// color input can be sampled onto the ray-marched surface.
 precision highp float;
 in vec2 vUv;
 out vec4 fragColor;
 uniform vec2  uResolution;
+uniform sampler2D uColor;
 uniform sampler2D uHeightMap;
 uniform float uHeightScale;
 uniform float uTerrainSize;   // world-space width/depth of the sampled area
@@ -26,7 +27,7 @@ const float STEP_SCALE = 0.55;
 
 const vec3 LUMA = vec3(0.299, 0.587, 0.114);
 
-// sample the input image as luminance so colored images also work correctly
+// sample the height map as luminance so colored height images also work correctly
 float sampleHeight(vec2 uv) {
     vec3 color = texture(uHeightMap, clamp(uv, 0.0, 1.0)).rgb;
     return dot(color, LUMA) * uHeightScale;
@@ -143,9 +144,8 @@ void main() {
         float ambient = 0.18;
         float shade = ambient + diff * 0.82;
 
-        vec2 heightUv = p.xz / uTerrainSize + 0.5;
-        float heightValue = sampleHeight(heightUv) / max(uHeightScale, 0.0001);
-        vec3 baseColor = vec3(0.35 + heightValue * 0.45);
+        vec2 surfaceUv = clamp(p.xz / uTerrainSize + 0.5, 0.0, 1.0);
+        vec3 baseColor = texture(uColor, surfaceUv).rgb;
 
         color = baseColor * shade;
     } else {

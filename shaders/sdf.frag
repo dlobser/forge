@@ -1,6 +1,6 @@
 #version 300 es
-// SDF — circle / square / triangle / torus distance field from a centre, mapped to
-// brightness by exp(-|d|*dropoff). Aspect-corrected so circles stay round.
+// SDF — radial / square / triangle / ring distance field from a centre,
+// mapped to brightness by exp(-|d|*dropoff).
 precision highp float;
 in vec2 vUv;
 out vec4 fragColor;
@@ -41,18 +41,15 @@ void main() {
 
     float d;
     if (uShape < 0.5) {
-        d = length(p) - 1.0;                              // circle: subtract 1 so d==0 lands on the boundary, not the centre
+        d = length(p);                                    // radial (filled)
     } else if (uShape < 1.5) {
         vec2 q = abs(p) - vec2(1.0);                      // square (box, half-size 1)
         d = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
     } else if (uShape < 2.5) {
         d = sdTriangle(p);                                // triangle
     } else {
-        d = abs(length(p) - uRing / s);                   // torus / ring
+        d = abs(length(p) - uRing);                       // ring
     }
-
-    // scale back to real UV-space distance units
-    d *= s;
 
     float v = exp(-abs(d) * uDropoff);
     if (uInvert > 0.5) v = 1.0 - v;

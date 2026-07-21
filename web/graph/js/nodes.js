@@ -12,12 +12,31 @@ const IMG = 'IMAGE';
 const THUMB_H = 116;
 
 // copy shader for the Crop/Scale node (resamples its input into a sized texture)
+// uMode: 0 = stretch (fill, ignore aspect), 1 = crop (cover, fill + clip overflow), 2 = letterbox/pillarbox (contain, pad with bars)
 const CP_VERT = `#version 300 es
 precision highp float; out vec2 vUv;
 void main(){ vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2)); vUv=p; gl_Position=vec4(p*2.0-1.0,0.0,1.0); }`;
 const CP_FRAG = `#version 300 es
-precision highp float; in vec2 vUv; out vec4 o; uniform sampler2D uColor;
-void main(){ o=texture(uColor, vUv); }`;
+precision highp float; in vec2 vUv; out vec4 o;
+uniform sampler2D uColor; uniform vec2 uResolution; uniform float uInW, uInH, uMode;
+void main(){
+  if (uMode < 0.5) { o = texture(uColor, vUv); return; }
+  float inW = max(uInW, 1.0), inH = max(uInH, 1.0);
+  if (uMode < 1.5) {
+    float scale = max(uResolution.x / inW, uResolution.y / inH);
+    vec2 frac = vec2(uResolution.x / (inW * scale), uResolution.y / (inH * scale));
+    o = texture(uColor, 0.5 + (vUv - 0.5) * frac);
+  } else {
+    float scale = min(uResolution.x / inW, uResolution.y / inH);
+    vec2 disp = vec2(inW, inH) * scale;
+    vec2 offset = (uResolution - disp) * 0.5;
+    vec2 local = vUv * uResolution - offset;
+    if (local.x < 0.0 || local.x > disp.x || local.y < 0.0 || local.y > disp.y) o = vec4(0.0, 0.0, 0.0, 1.0);
+    else o = texture(uColor, local / disp);
+  }
+}`;
+const CP_CONTROLS = [{ uniform: 'uInW', value: 1024 }, { uniform: 'uInH', value: 1024 }, { uniform: 'uMode', value: 0 }];
+const FIT_MODES = { stretch: 0, crop: 1, letterbox: 2 };
 
 const galleryValues = () => RT.gallery.map((i) => i.filename);
 const setWidget = (node, name, value) => { const w = (node.widgets || []).find((x) => x.name === name); if (w) w.value = value; };
@@ -130,7 +149,7 @@ ImportNode.prototype.evaluate = function () { if (this._out && this._out.tex) th
 const ASPECT_SIZES = { '1:1': [1024, 1024], '16:9': [1920, 1080], '9:16': [1080, 1920], '4:3': [1024, 768], '3:4': [768, 1024] };
 function CropScaleNode() {
   this.addInput('image', IMG); this.addOutput('out', IMG);
-  this.properties = { aspect: 'custom', width: 1024, height: 1024 };
+  this.properties = { aspect: 'custom', width: 1024, height: 1024, fit: 'stretch' };
   this.addWidget('combo', 'aspect', this.properties.aspect, (v) => {
     this.properties.aspect = v;
     const preset = ASPECT_SIZES[v];
@@ -140,6 +159,7 @@ function CropScaleNode() {
   }, { values: ['1:1', '16:9', '9:16', '4:3', '3:4', 'custom'] });
   this.addWidget('number', 'width', this.properties.width, (v) => { this.properties.width = Math.max(64, Math.round(v)); this.properties.aspect = 'custom'; setWidget(this, 'aspect', 'custom'); this._realloc(); RT.requestSave(); }, { min: 64, max: 8192, step: 1 });
   this.addWidget('number', 'height', this.properties.height, (v) => { this.properties.height = Math.max(64, Math.round(v)); this.properties.aspect = 'custom'; setWidget(this, 'aspect', 'custom'); this._realloc(); RT.requestSave(); }, { min: 64, max: 8192, step: 1 });
+  this.addWidget('combo', 'fit', this.properties.fit, (v) => { this.properties.fit = v; this._dirty = true; RT.requestSave(); }, { values: ['stretch', 'crop', 'letterbox'] });
   this._size = { width: this.properties.width, height: this.properties.height }; this._dirty = true;
   attachThumb(this); sizeWithThumb(this);
 }
@@ -147,17 +167,23 @@ CropScaleNode.title = 'Crop / Scale';
 CropScaleNode.prototype._realloc = function () { if (this._out && this._out.tex) RT.engine.gl.deleteTexture(this._out.tex); this._out = null; this._size = { width: +this.properties.width || 1024, height: +this.properties.height || 1024 }; this._dirty = true; };
 CropScaleNode.prototype.onConfigure = function () {
   this.properties.aspect = this.properties.aspect || 'custom';
+  this.properties.fit = this.properties.fit || 'stretch';
   this._size = { width: +this.properties.width || 1024, height: +this.properties.height || 1024 }; this._dirty = true;
   setWidget(this, 'aspect', this.properties.aspect); setWidget(this, 'width', this._size.width); setWidget(this, 'height', this._size.height);
+  setWidget(this, 'fit', this.properties.fit);
 };
 CropScaleNode.prototype.evaluate = function () {
   const h = this.getInputData(0);
   const v = h && h.tex ? (h.version | 0) : -1;
-  if (this._dirty || v !== this._inV) {
-    this._inV = v;
+  const fit = this.properties.fit || 'stretch';
+  if (this._dirty || v !== this._inV || fit !== this._inFit) {
+    this._inV = v; this._inFit = fit;
     ensureOut(this);
     if (h && h.tex) {
-      RT.engine.renderToTexture({ key: '__cropscale', vertSrc: CP_VERT, fragSrc: CP_FRAG, inputs: ['color'], inputTextures: { color: h.tex }, controls: [] }, this._out.tex, this._size.width, this._size.height);
+      RT.engine.renderToTexture({
+        key: '__cropscale', vertSrc: CP_VERT, fragSrc: CP_FRAG, inputs: ['color'], inputTextures: { color: h.tex },
+        controls: CP_CONTROLS, params: { uInW: h.width || this._size.width, uInH: h.height || this._size.height, uMode: FIT_MODES[fit] || 0 },
+      }, this._out.tex, this._size.width, this._size.height);
       this._out.version++;
     }
     this._dirty = false;
