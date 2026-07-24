@@ -1,0 +1,100 @@
+{
+  "shaders": [
+    {
+      "key": "blend",
+      "js": "/shaders/blend.js",
+      "frag": "/shaders/blend.frag",
+      "vert": null
+    },
+    {
+      "key": "blur",
+      "js": "/shaders/blur.js",
+      "frag": "/shaders/blur.frag",
+      "vert": null
+    },
+    {
+      "key": "colorGrade",
+      "js": "/shaders/colorGrade.js",
+      "frag": "/shaders/colorGrade.frag",
+      "vert": null
+    },
+    {
+      "key": "depthEdges",
+      "js": "/shaders/depthEdges.js",
+      "frag": "/shaders/depthEdges.frag",
+      "vert": null
+    },
+    {
+      "key": "depthParallax",
+      "js": "/shaders/depthParallax.js",
+      "frag": "/shaders/depthParallax.frag",
+      "vert": null
+    },
+    {
+      "key": "distort",
+      "js": "/shaders/distort.js",
+      "frag": "/shaders/distort.frag",
+      "vert": null
+    },
+    {
+      "key": "distortion",
+      "js": "/shaders/distortion.js",
+      "frag": "/shaders/distortion.frag",
+      "vert": null
+    },
+    {
+      "key": "erosion",
+      "js": "/shaders/erosion.js",
+      "frag": "/shaders/erosion.frag",
+      "vert": null
+    },
+    {
+      "key": "feedbackDeform",
+      "js": "/shaders/feedbackDeform.js",
+      "frag": "/shaders/feedbackDeform.frag",
+      "vert": null
+    },
+    {
+      "key": "kuramoto",
+      "js": "/shaders/kuramoto.js",
+      "frag": "/shaders/kuramoto.frag",
+      "vert": null
+    },
+    {
+      "key": "noise",
+      "js": "/shaders/noise.js",
+      "frag": "/shaders/noise.frag",
+      "vert": null
+    },
+    {
+      "key": "remap",
+      "js": "/shaders/remap.js",
+      "frag": "/shaders/remap.frag",
+      "vert": null
+    },
+    {
+      "key": "sdf",
+      "js": "/shaders/sdf.js",
+      "frag": "/shaders/sdf.frag",
+      "vert": null
+    },
+    {
+      "key": "sinwave",
+      "js": "/shaders/sinwave.js",
+      "frag": "/shaders/sinwave.frag",
+      "vert": null
+    },
+    {
+      "key": "smoothstep",
+      "js": "/shaders/smoothstep.js",
+      "frag": "/shaders/smoothstep.frag",
+      "vert": null
+    },
+    {
+      "key": "wilsonCowan",
+      "js": "/shaders/wilsonCowan.js",
+      "frag": "/shaders/wilsonCowan.frag",
+      "vert": null
+    }
+  ]
+}

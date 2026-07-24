@@ -1,0 +1,72 @@
+{
+  "mathnodes": [
+    {
+      "key": "abs",
+      "js": "/mathnodes/abs.js"
+    },
+    {
+      "key": "add",
+      "js": "/mathnodes/add.js"
+    },
+    {
+      "key": "clamp",
+      "js": "/mathnodes/clamp.js"
+    },
+    {
+      "key": "cosine",
+      "js": "/mathnodes/cosine.js"
+    },
+    {
+      "key": "deltatime",
+      "js": "/mathnodes/deltatime.js"
+    },
+    {
+      "key": "divide",
+      "js": "/mathnodes/divide.js"
+    },
+    {
+      "key": "float",
+      "js": "/mathnodes/float.js"
+    },
+    {
+      "key": "int",
+      "js": "/mathnodes/int.js"
+    },
+    {
+      "key": "mix",
+      "js": "/mathnodes/mix.js"
+    },
+    {
+      "key": "mod",
+      "js": "/mathnodes/mod.js"
+    },
+    {
+      "key": "multiply",
+      "js": "/mathnodes/multiply.js"
+    },
+    {
+      "key": "oscillator",
+      "js": "/mathnodes/oscillator.js"
+    },
+    {
+      "key": "remap",
+      "js": "/mathnodes/remap.js"
+    },
+    {
+      "key": "sine",
+      "js": "/mathnodes/sine.js"
+    },
+    {
+      "key": "smoothstep",
+      "js": "/mathnodes/smoothstep.js"
+    },
+    {
+      "key": "subtract",
+      "js": "/mathnodes/subtract.js"
+    },
+    {
+      "key": "time",
+      "js": "/mathnodes/time.js"
+    }
+  ]
+}
