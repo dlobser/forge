@@ -8,6 +8,10 @@ import { ShaderEngine } from './engine.js';
 import { api } from '../../js/api.js';
 import { RT } from './runtime.js';
 import { registerNodes } from './nodes.js';
+import {
+  carryGraphInto, confirmProjectSwitch, doc, initFileMenu, markDirty, save, updateTitle,
+} from './filemenu.js';
+import { askText } from './ui.js';
 
 const LG = window.LiteGraph;
 const $ = (id) => document.getElementById(id);
@@ -76,14 +80,19 @@ function evalOnce(advance) {
 }
 
 // ── graph persistence ───────────────────────────────────────────────────────────
+// Autosave is a safety net, not the Save command: it writes the working state of
+// the current document so a crash or closed tab loses nothing, but never records
+// a version. Explicit Save (File ▸ Save / Ctrl+S, in filemenu.js) is what appends
+// to the history — otherwise every keystroke would become a "version".
 let saveTimer = null;
 function requestSave() {
+  markDirty();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(async () => {
     try {
       await fetch('/api/graph', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project: RT.project, graph: RT.graph.serialize() }),
+        body: JSON.stringify({ project: RT.project, name: doc.name, graph: RT.graph.serialize() }),
       });
     } catch (e) { /* ignore */ }
   }, 500);
@@ -96,6 +105,16 @@ async function loadGraph(project) {
     try { RT.graph.configure(data); } catch (e) { console.error('graph configure failed', e); }
   }
   RT.redraw();
+}
+
+// Whichever document the project opens on becomes the current one.
+async function syncDocName() {
+  try {
+    const r = await fetch('/api/graphs?project=' + encodeURIComponent(RT.project));
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d && d.current) { doc.name = d.current; updateTitle(); }
+  } catch (e) { /* static build has no documents */ }
 }
 
 // ── projects ─────────────────────────────────────────────────────────────────
@@ -112,7 +131,17 @@ async function switchProject(name) {
   RT.project = name;
   await api.selectProject(name).catch(() => {});
   await refreshGallery();
+  await syncDocName();
   await loadGraph(name);
+  doc.savedRev = doc.rev; doc.dirty = false; updateTitle();
+}
+
+// File ▸ New Project… and the post-import switch both come through here.
+async function createProject(name) {
+  await api.createProject(name);
+  await fillProjects();
+  $('projectSelect').value = name;
+  await switchProject(name);
 }
 
 // ── comfy status ──────────────────────────────────────────────────────────────
@@ -166,13 +195,25 @@ function resizeCanvas(canvas) {
   await loadGraph(RT.project);
 
   // topbar
-  $('projectSelect').onchange = (e) => switchProject(e.target.value).catch((err) => toast(err.message, 'bad'));
-  $('newProjectBtn').onclick = async () => {
-    const name = prompt('New project name:'); if (!name) return;
-    await api.createProject(name); await fillProjects(); $('projectSelect').value = name;
-    await switchProject(name); toast('Project “' + name + '” created', 'good');
+  // Switching replaces the canvas with the target project's own graph, so ask
+  // first rather than having work vanish from under the cursor. Cancelling puts
+  // the dropdown back where it was.
+  $('projectSelect').onchange = async (e) => {
+    const target = e.target.value, from = RT.project;
+    if (!target || target === from) return;
+    try {
+      const choice = await confirmProjectSwitch(from, target);
+      if (!choice) { e.target.value = from; return; }
+      if (choice === 'save') await save();
+      const carried = choice === 'copy' ? RT.graph.serialize() : null;
+      const carriedName = doc.name;
+      await switchProject(target);
+      if (carried) await carryGraphInto(target, carried, carriedName);
+    } catch (err) {
+      e.target.value = from;
+      toast(err.message, 'bad');
+    }
   };
-  $('importBtn').onclick = () => $('importInput').click();
   $('importInput').onchange = async (e) => {
     const files = [...e.target.files]; e.target.value = ''; if (!files.length) return;
     toast('Importing…');
@@ -180,9 +221,19 @@ function resizeCanvas(canvas) {
     catch (err) { toast('Import failed: ' + err.message, 'bad'); }
   };
   $('addNodeBtn').onclick = (e) => { if (RT.graphcanvas.showSearchBox) RT.graphcanvas.showSearchBox(e); };
-  $('saveGraphBtn').onclick = async () => {
-    try { await fetch('/api/graph', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ project: RT.project, graph: RT.graph.serialize() }) }); toast('Graph saved', 'good'); }
-    catch (e2) { toast('Save failed', 'bad'); }
+
+  // hooks the File menu calls back into (it owns the UI, graphApp owns the state)
+  RT.newProject = async () => {
+    const name = await askText({ title: 'New project', sub: 'A project is a workspace with its own image gallery.', value: '', ok: 'Create' });
+    if (!name) return;
+    try { await createProject(name); toast('Project “' + name + '” created', 'good'); }
+    catch (e2) { toast('Could not create: ' + e2.message, 'bad'); }
+  };
+  RT.onProjectImported = async (name) => {
+    await fillProjects();
+    const sel = $('projectSelect');
+    if (sel) sel.value = name;
+    await switchProject(name);
   };
 
   // global play / pause (freezes time + feedback; edits still re-render)
@@ -200,6 +251,10 @@ function resizeCanvas(canvas) {
 
   // comfy is checked once on boot (and again when an AI node is created); no polling
   pollComfy();
+
+  // File menu last: it needs RT.graph and RT.project already in place, and it
+  // probes the backend to decide which items this build can actually offer.
+  await initFileMenu();
 
   // the single render/eval loop — time accumulates only while playing, so pause
   // freezes time-driven shaders and feedback sims (RT.advance gates the nodes).

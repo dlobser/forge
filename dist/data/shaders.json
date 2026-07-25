@@ -67,6 +67,12 @@
       "vert": null
     },
     {
+      "key": "gradient",
+      "js": "/shaders/gradient.js",
+      "frag": "/shaders/gradient.frag",
+      "vert": null
+    },
+    {
       "key": "hexagonalMosaic",
       "js": "/shaders/hexagonalMosaic.js",
       "frag": "/shaders/hexagonalMosaic.frag",
@@ -82,6 +88,12 @@
       "key": "kaleidoscope",
       "js": "/shaders/kaleidoscope.js",
       "frag": "/shaders/kaleidoscope.frag",
+      "vert": null
+    },
+    {
+      "key": "key",
+      "js": "/shaders/key.js",
+      "frag": "/shaders/key.frag",
       "vert": null
     },
     {

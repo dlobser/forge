@@ -348,6 +348,22 @@ function makeShaderNode(def) {
     this.setOutputData(0, this._out);
   };
   Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this._out.tex, this._out); };
+  if ((def.controls || []).some((c) => c.uniform === 'uPickX')) {
+    Node.prototype.onMouseDown = function (_e, pos) {
+      if (this.flags.collapsed) return;
+      const thumbY = this.size[1] - THUMB_H;
+      if (pos[1] >= thumbY && pos[1] <= this.size[1] && pos[0] >= 0 && pos[0] <= this.size[0]) {
+        const normX = Math.max(0, Math.min(1, pos[0] / this.size[0]));
+        const normY = Math.max(0, Math.min(1, 1.0 - (pos[1] - thumbY) / THUMB_H));
+        this.properties.params.uPickX = Math.round(normX * 1000) / 1000;
+        this.properties.params.uPickY = Math.round(normY * 1000) / 1000;
+        this.properties.params.uUsePickPos = true;
+        syncShaderWidgets(this);
+        markDirty(this);
+        return true;
+      }
+    };
+  }
 
   // ── right-click menu: render size, plus pin ↔ slider per control ──
   Node.prototype.getExtraMenuOptions = function () {

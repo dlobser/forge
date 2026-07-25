@@ -17,6 +17,9 @@
       background:var(--panel); border-bottom:1px solid var(--line); position:relative; z-index:5; }
     #topbar .brand{ letter-spacing:3px; font-weight:300; color:var(--muted); margin-right:8px; }
     #topbar .brand b{ color:var(--accent); font-weight:700; }
+    /* current document name; gains a • while there are unsaved changes */
+    #topbar .docname{ color:var(--muted); font-size:12px; max-width:220px; overflow:hidden;
+      text-overflow:ellipsis; white-space:nowrap; margin-right:4px; }
     #topbar label{ color:var(--muted); text-transform:uppercase; font-size:10px; letter-spacing:1px; }
     #topbar .spacer{ flex:1; }
     select,.btn{ background:#1c2028; color:var(--text); border:1px solid var(--line);
@@ -48,15 +51,15 @@
 <body>
   <div id="topbar">
     <span class="brand">FORGE <b>GRAPH</b></span>
+    <button id="fileMenuBtn" class="btn" title="File">File ▾</button>
+    <span id="docName" class="docname" title="Saved">Untitled</span>
     <label>Project</label>
     <select id="projectSelect"></select>
-    <button id="newProjectBtn" class="btn" title="New project">＋</button>
-    <button id="importBtn" class="btn">Import…</button>
+    <!-- image picker: opened from File ▸ Import Image… -->
     <input id="importInput" type="file" accept="image/*" hidden multiple />
     <span class="spacer"></span>
     <button id="playBtn" class="btn" title="Pause">⏸</button>
     <button id="addNodeBtn" class="btn">＋ Add node</button>
-    <button id="saveGraphBtn" class="btn">Save graph</button>
     <button id="authorUiBtn" class="btn" title="Define the end-user front-end">Author UI</button>
     <button id="settingsBtn" class="btn" title="Settings">⚙</button>
     <a class="btn" href="play.html" title="Preview your authored UI" target="_blank">preview ↗</a>
@@ -78,6 +81,8 @@
   <script src="js/forge-store.js"></script>
   <script src="js/static-shim.js"></script>
   <script src="web/graph/vendor/litegraph.js"></script>
+  <!-- graphApp boots the editor and then initialises the File menu itself, so the
+       menu never races the graph it operates on -->
   <script type="module" src="web/graph/js/graphApp.js"></script>
   <script type="module" src="web/graph/js/author.js"></script>
   <script type="module" src="web/graph/js/webeditor.js"></script>
