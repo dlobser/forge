@@ -4,7 +4,7 @@
 // stays untouched. It adds what the node graph needs (additive, non-breaking):
 //   - _bindImages honours spec.inputTextures (a raw GL texture per named input),
 //     so every node input can be fed by an upstream node's output texture.
-//   - renderToTexture(spec, targetTex, size) renders one node into its own texture.
+//   - renderToTexture(spec, targetTex, width, height) renders one node into its own texture.
 //   - allocTexture / blitToCanvas / captureTexture for per-node textures, in-node
 //     previews (ctx.drawImage of the gl canvas), and PNG capture (save/sequence).
 // Feedback (ping-pong) state is kept per simKey = node id, so many feedback nodes
@@ -30,7 +30,7 @@ export class ShaderEngine {
     this.texCache = new WeakMap();
     this.solid = { gray: this._solid([128, 128, 128, 255]), black: this._solid([0, 0, 0, 255]) };
     this.fbo = gl.createFramebuffer();
-    this.fboTex = null; this.fboSize = 0;
+    this.fboTex = null; this.fboSize = '';
     this.floatRenderable = !!gl.getExtension('EXT_color_buffer_float');
     this.simFbo = gl.createFramebuffer();
     this.nodeFbo = gl.createFramebuffer();   // for renderToTexture
@@ -101,13 +101,13 @@ export class ShaderEngine {
   // precision through a chain of shaders instead of re-quantising to 8 bit at every
   // pass (and it can hold values <0 / >1, e.g. Sine Wave). Falls back to RGBA8 if
   // float render targets aren't supported. RGBA16F is linearly filterable in WebGL2.
-  allocTexture(size) {
+  allocTexture(width, height = width) {
     const gl = this.gl, t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
     if (this.floatRenderable)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, size, size, 0, gl.RGBA, gl.HALF_FLOAT, null);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.HALF_FLOAT, null);
     else
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -256,27 +256,27 @@ export class ShaderEngine {
 
   // ── node-graph render entry points ──────────────────────────────────────────
   // render one node's shader into targetTex (its own output texture)
-  renderToTexture(spec, targetTex, size) {
+  renderToTexture(spec, targetTex, width, height = width) {
     const gl = this.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.nodeFbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targetTex, 0);
-    this._draw(spec, size, size);
+    this._draw(spec, width, height);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
   // draw a texture into the visible gl canvas (so a node can ctx.drawImage it)
-  blitToCanvas(tex, size) {
-    if (this.canvas.width !== size) { this.canvas.width = size; this.canvas.height = size; }
-    this._blit(tex, null, size);
+  blitToCanvas(tex, width, height = width) {
+    if (this.canvas.width !== width || this.canvas.height !== height) { this.canvas.width = width; this.canvas.height = height; }
+    this._blit(tex, null, width, height);
   }
 
   // draw a texture into a target framebuffer (null = canvas)
-  _blit(tex, targetFbo, size) {
+  _blit(tex, targetFbo, width, height = width) {
     const gl = this.gl;
     const info = this.ensureProgram('__copy', COPY_VERT, COPY_FRAG);
     gl.useProgram(info.prog); gl.bindVertexArray(this.vao);
     gl.bindFramebuffer(gl.FRAMEBUFFER, targetFbo);
-    gl.viewport(0, 0, size, size);
+    gl.viewport(0, 0, width, height);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform1i(this._loc(info, 'uColor'), 0);
     gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
@@ -285,35 +285,35 @@ export class ShaderEngine {
   }
 
   // read a node texture back to a PNG blob (Save / Sequence nodes)
-  async captureTexture(tex, size) {
-    this._ensureCaptureFbo(size);
-    this._blit(tex, this.fbo, size);
-    return this._readBlob(size);
+  async captureTexture(tex, width, height = width) {
+    this._ensureCaptureFbo(width, height);
+    this._blit(tex, this.fbo, width, height);
+    return this._readBlob(width, height);
   }
 
-  _ensureCaptureFbo(size) {
-    const gl = this.gl;
-    if (this.fboSize === size) return;
+  _ensureCaptureFbo(width, height = width) {
+    const gl = this.gl, key = width + 'x' + height;
+    if (this.fboSize === key) return;
     if (this.fboTex) gl.deleteTexture(this.fboTex);
     this.fboTex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.fboTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, size, size, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.fboTex, 0);
-    this.fboSize = size;
+    this.fboSize = key;
   }
 
-  _readBlob(size) {
+  _readBlob(width, height = width) {
     const gl = this.gl;
-    const px = new Uint8Array(size * size * 4);
+    const px = new Uint8Array(width * height * 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
-    gl.readPixels(0, 0, size, size, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, px);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const c = document.createElement('canvas'); c.width = size; c.height = size;
-    const ctx = c.getContext('2d'); const img = ctx.createImageData(size, size);
-    const row = size * 4;
-    for (let y = 0; y < size; y++) img.data.set(px.subarray((size - 1 - y) * row, (size - y) * row), y * row);
+    const c = document.createElement('canvas'); c.width = width; c.height = height;
+    const ctx = c.getContext('2d'); const img = ctx.createImageData(width, height);
+    const row = width * 4;
+    for (let y = 0; y < height; y++) img.data.set(px.subarray((height - 1 - y) * row, (height - y) * row), y * row);
     ctx.putImageData(img, 0, 0);
     return new Promise((res) => c.toBlob(res, 'image/png'));
   }

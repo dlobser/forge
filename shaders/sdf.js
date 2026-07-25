@@ -1,13 +1,13 @@
-// sdf — a signed-distance gradient from a movable centre. Pick a shape and a
-// dropoff (how fast the brightness fades from the edge). A generator (no input).
-// Feed it into the Distort node (or noise's distort) to push UVs along the field.
+// sdf — a distance-field gradient from a movable centre. Shape 0 is the
+// original radial gradient; other shapes give square, triangle, and ring
+// fields. Feed an optional image into Distort to deform the field.
 export default {
   name: "SDF",
   inputs: ["distort"],
   inputLabels: { distort: "distort" },
   controls: [
     { uniform: "uShape", label: "Shape", type: "select", value: 0,
-      options: [{ label: "Circle", value: 0 }, { label: "Square", value: 1 }, { label: "Triangle", value: 2 }, { label: "Torus", value: 3 }] },
+      options: [{ label: "Radial", value: 0 }, { label: "Square", value: 1 }, { label: "Triangle", value: 2 }, { label: "Ring", value: 3 }] },
     { uniform: "uDistortAmt", label: "Distort In", type: "range", min: -20, max: 20, step: 0.005, value: 0 },
     { uniform: "uCenterX", label: "Center X",    type: "range", min: 0, max: 1, step: 0.005, value: 0.5 },
     { uniform: "uCenterY", label: "Center Y",    type: "range", min: 0, max: 1, step: 0.005, value: 0.5 },
