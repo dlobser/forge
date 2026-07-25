@@ -7,6 +7,7 @@ Run:  python -m forge_server.server          ->  http://127.0.0.1:8191
 
 Layout served:
     /              -> web/graph/index.html (node view, the default)
+    /play.html     -> web/graph/play.html (the authored end-user front-end)
     /classic       -> web/index.html (original chain view)
     /web/*         -> web/ (js, css)
     /shaders/*     -> shaders/ (the .vert/.frag/.js triplets, scanned + imported
@@ -25,7 +26,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import config, depth, projects, video, workflows
+from . import bundle, config, depth, graphs, projects, video, workflows
 from .comfy import ComfyClient, ComfyError
 
 ROOT = config.ROOT
@@ -359,29 +360,155 @@ def api_generate(req: GenerateReq):
                                 "images": req.images})
 
 
-# ── node graph (Forge Graph version) — its own file, never touches project.json ──
+# ── node graph documents ─────────────────────────────────────────────────────
+# A project is a workspace; graphs are documents inside it (see graphs.py). This
+# never touches project.json. GET /api/graph without a `name` returns the current
+# document, which is what the published player asks for and how this behaved
+# before documents existed.
 @app.get("/api/graph")
-def api_get_graph(project: Optional[str] = None):
-    p = config.project_dir(_settings, project or current_project()) / "graph.json"
-    if p.exists():
-        try:
-            return json.loads(p.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {}
+def api_get_graph(project: Optional[str] = None, name: Optional[str] = None):
+    return graphs.load(_settings, project or current_project(), name)
 
 
 class GraphReq(BaseModel):
     project: Optional[str] = None
+    name: Optional[str] = None
     graph: Dict[str, Any]
+    snapshot: bool = False       # explicit Save also writes a version
+    label: str = ""
 
 
 @app.post("/api/graph")
 def api_save_graph(req: GraphReq):
-    base = config.project_dir(_settings, req.project or current_project())
-    base.mkdir(parents=True, exist_ok=True)
-    (base / "graph.json").write_text(json.dumps(req.graph, indent=2), encoding="utf-8")
-    return {"ok": True}
+    project = req.project or current_project()
+    name = req.name or graphs.current(_settings, project)
+    return graphs.save(_settings, project, name, req.graph,
+                       snapshot=req.snapshot, label=req.label)
+
+
+@app.get("/api/graphs")
+def api_list_graphs(project: Optional[str] = None):
+    project = project or current_project()
+    return {"graphs": graphs.list_graphs(_settings, project),
+            "current": graphs.current(_settings, project)}
+
+
+class GraphNameReq(BaseModel):
+    project: Optional[str] = None
+    name: str
+
+
+@app.post("/api/graphs/select")
+def api_select_graph(req: GraphNameReq):
+    project = req.project or current_project()
+    graphs.set_current(_settings, project, req.name)
+    return {"ok": True, "name": graphs.current(_settings, project),
+            "graph": graphs.load(_settings, project, req.name)}
+
+
+class SaveAsReq(BaseModel):
+    project: Optional[str] = None
+    name: str
+    graph: Dict[str, Any]
+
+
+@app.post("/api/graphs/saveas")
+def api_save_as(req: SaveAsReq):
+    """Save under a new document name in the same project, then switch to it.
+
+    Same project on purpose: the gallery lives at project level, so Source and
+    Import nodes keep resolving in the copy.
+    """
+    project = req.project or current_project()
+    name = graphs.unique_name(_settings, project, req.name)
+    graphs.save(_settings, project, name, req.graph, snapshot=True, label="saved as")
+    graphs.set_current(_settings, project, name)
+    return {"ok": True, "name": name}
+
+
+@app.post("/api/graphs/delete")
+def api_delete_graph(req: GraphNameReq):
+    project = req.project or current_project()
+    if len(graphs.list_graphs(_settings, project)) <= 1:
+        raise HTTPException(400, "a project needs at least one graph")
+    graphs.delete(_settings, project, req.name)
+    return {"ok": True, "current": graphs.current(_settings, project)}
+
+
+class RenameReq(BaseModel):
+    project: Optional[str] = None
+    name: str
+    new_name: str
+
+
+@app.post("/api/graphs/rename")
+def api_rename_graph(req: RenameReq):
+    project = req.project or current_project()
+    try:
+        return {"ok": True, "name": graphs.rename(_settings, project,
+                                                  req.name, req.new_name)}
+    except FileNotFoundError:
+        raise HTTPException(404, f"no graph named {req.name!r}")
+
+
+# ── version history ──────────────────────────────────────────────────────────
+@app.get("/api/graph/versions")
+def api_list_versions(project: Optional[str] = None, name: Optional[str] = None):
+    project = project or current_project()
+    name = name or graphs.current(_settings, project)
+    return {"name": name, "versions": graphs.list_versions(_settings, project, name)}
+
+
+@app.get("/api/graph/version")
+def api_get_version(id: str, project: Optional[str] = None,
+                    name: Optional[str] = None):
+    project = project or current_project()
+    name = name or graphs.current(_settings, project)
+    try:
+        return graphs.load_version(_settings, project, name, id)
+    except FileNotFoundError:
+        raise HTTPException(404, "no such version")
+
+
+class VersionReq(BaseModel):
+    project: Optional[str] = None
+    name: Optional[str] = None
+    id: str
+
+
+@app.post("/api/graph/version/restore")
+def api_restore_version(req: VersionReq):
+    project = req.project or current_project()
+    name = req.name or graphs.current(_settings, project)
+    try:
+        return {"ok": True, "graph": graphs.restore_version(
+            _settings, project, name, req.id)}
+    except FileNotFoundError:
+        raise HTTPException(404, "no such version")
+
+
+# ── .forge.json bundles ──────────────────────────────────────────────────────
+@app.get("/api/export/graph")
+def api_export_graph(project: Optional[str] = None, name: Optional[str] = None):
+    return bundle.export_graph(_settings, project or current_project(), name)
+
+
+@app.get("/api/export/project")
+def api_export_project(project: Optional[str] = None):
+    return bundle.export_project(_settings, project or current_project())
+
+
+class ImportReq(BaseModel):
+    payload: Dict[str, Any]
+    project: Optional[str] = None
+
+
+@app.post("/api/import/bundle")
+def api_import_bundle(req: ImportReq):
+    try:
+        return bundle.import_bundle(_settings, req.payload, req.project)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 # ── static front-end ─────────────────────────────────────────────────────────
@@ -389,6 +516,18 @@ def api_save_graph(req: GraphReq):
 def index():
     # Forge is node-only going forward: the graph view is the default front-end.
     return FileResponse(WEB_DIR / "graph" / "index.html")
+
+
+# The authored end-user front-end. author.js opens this with a *relative* URL
+# ('play.html'), because in a static export index.html and play.html really are
+# siblings at the site root. Here the editor is served from "/" while the file
+# itself lives at /web/graph/play.html, so that relative link lands on "/play.html"
+# — which is why it used to 404. Serve the file there so the same relative link
+# works in both deployments.
+@app.get("/play.html")
+@app.get("/play")
+def play():
+    return FileResponse(WEB_DIR / "graph" / "play.html")
 
 
 @app.get("/classic")
