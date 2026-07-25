@@ -8,7 +8,9 @@ import { ShaderEngine } from './engine.js';
 import { api } from '../../js/api.js';
 import { RT } from './runtime.js';
 import { registerNodes } from './nodes.js';
-import { doc, initFileMenu, markDirty, updateTitle } from './filemenu.js';
+import {
+  carryGraphInto, confirmProjectSwitch, doc, initFileMenu, markDirty, save, updateTitle,
+} from './filemenu.js';
 import { askText } from './ui.js';
 
 const LG = window.LiteGraph;
@@ -193,7 +195,25 @@ function resizeCanvas(canvas) {
   await loadGraph(RT.project);
 
   // topbar
-  $('projectSelect').onchange = (e) => switchProject(e.target.value).catch((err) => toast(err.message, 'bad'));
+  // Switching replaces the canvas with the target project's own graph, so ask
+  // first rather than having work vanish from under the cursor. Cancelling puts
+  // the dropdown back where it was.
+  $('projectSelect').onchange = async (e) => {
+    const target = e.target.value, from = RT.project;
+    if (!target || target === from) return;
+    try {
+      const choice = await confirmProjectSwitch(from, target);
+      if (!choice) { e.target.value = from; return; }
+      if (choice === 'save') await save();
+      const carried = choice === 'copy' ? RT.graph.serialize() : null;
+      const carriedName = doc.name;
+      await switchProject(target);
+      if (carried) await carryGraphInto(target, carried, carriedName);
+    } catch (err) {
+      e.target.value = from;
+      toast(err.message, 'bad');
+    }
+  };
   $('importInput').onchange = async (e) => {
     const files = [...e.target.files]; e.target.value = ''; if (!files.length) return;
     toast('Importing…');

@@ -19,7 +19,7 @@
 import { RT } from './runtime.js';
 import { buildPlayLink, inspectShareability } from './share.js';
 import {
-  BTN, BTN_DANGER, BTN_PRIMARY, askConfirm, askList, askText, downloadJSON,
+  BTN, BTN_DANGER, BTN_PRIMARY, askChoice, askConfirm, askList, askText, downloadJSON,
   dropdown, h, modal, pickJSONFile, title, toast,
 } from './ui.js';
 
@@ -301,6 +301,73 @@ async function importFile() {
     }
     if (RT.onProjectImported) await RT.onProjectImported(project);
   } catch (e) { toast('Import failed: ' + e.message, 'bad'); }
+}
+
+// ── switching projects ───────────────────────────────────────────────────────
+// Switching swaps in the target project's own graph, so the one on screen
+// disappears. It is not lost — it stays saved in the project it belongs to —
+// but that is not obvious from a dropdown that changes the canvas underneath
+// you, so say what will happen and offer to bring the graph along.
+
+// Gallery images referenced by a graph belong to the project that holds them,
+// so a carried graph would point at files the target project doesn't have.
+function referencedImages(graph) {
+  const out = new Set();
+  for (const n of (graph && graph.nodes) || []) {
+    const p = n.properties || {};
+    for (const k of ['file', 'output']) {
+      if (typeof p[k] === 'string' && /\.(png|jpe?g|webp|bmp)$/i.test(p[k])) out.add(p[k]);
+    }
+  }
+  return [...out];
+}
+
+export async function confirmProjectSwitch(from, to) {
+  const graph = RT.graph.serialize();
+  const imgs = referencedImages(graph);
+  const choices = [];
+
+  if (doc.dirty) {
+    choices.push({
+      key: 'save', primary: true, label: 'Save, then switch',
+      hint: 'Records a version of “' + doc.name + '” in ' + from + ' first.',
+    });
+  }
+  choices.push({
+    key: 'switch', primary: !doc.dirty, label: 'Switch',
+    hint: doc.dirty
+      ? 'Recent edits are kept by autosave in “' + doc.name + '”, but no version is recorded.'
+      : '“' + doc.name + '” stays saved in ' + from + '; you can come back to it any time.',
+  });
+  if (caps.documents) {
+    choices.push({
+      key: 'copy', label: 'Take this graph along',
+      hint: 'Copies “' + doc.name + '” into ' + to + ' as a new graph, and opens it there.',
+    });
+  }
+
+  return askChoice({
+    title: 'Switch to “' + to + '”?',
+    sub: to + ' has its own graphs and its own image gallery, so the canvas will change.',
+    warnings: imgs.length
+      ? ['This graph uses ' + imgs.length + ' gallery image'
+        + (imgs.length === 1 ? '' : 's') + ' from ' + from
+        + '. Copying it to ' + to + ' will not bring '
+        + (imgs.length === 1 ? 'it' : 'them') + ' along — export the project instead '
+        + 'if you need the images too.']
+      : [],
+    choices,
+  });
+}
+
+// Drop the carried graph into the project that is now open.
+export async function carryGraphInto(project, graph, name) {
+  try {
+    const r = await jpost('/api/graphs/saveas', { project, name, graph });
+    doc.name = r.name;
+    await loadInto(graph);
+    toast('Copied “' + r.name + '” into ' + project, 'good');
+  } catch (e) { toast('Could not copy the graph: ' + e.message, 'bad'); }
 }
 
 // ── share ────────────────────────────────────────────────────────────────────

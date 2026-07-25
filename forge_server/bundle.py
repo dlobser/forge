@@ -141,7 +141,10 @@ def import_bundle(s: Dict[str, Any], payload: Dict[str, Any],
         docs = {graphs.safe_name(payload.get("name") or graphs.DEFAULT_NAME): graph}
 
     project = _unique_project(s, project_name or payload.get("project") or "Imported")
-    config.ensure_project_dirs(s, project)
+    # project.json is what makes a folder a project: config.list_projects only
+    # returns directories that have one, so an import that merely created the
+    # subfolders would land on disk and then be invisible in the project picker.
+    config.save_project(s, config.default_project(project))
 
     for name, graph in docs.items():
         if isinstance(graph, dict):

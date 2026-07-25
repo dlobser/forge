@@ -114,6 +114,40 @@ export function askConfirm(opts) {
   });
 }
 
+// A stack of labelled choices, each with a line explaining what it does. Used
+// where a plain OK/Cancel would hide the consequences — switching projects, say.
+// `choices` are {key, label, hint, primary}. Resolves the chosen key, or null.
+export function askChoice(opts) {
+  return new Promise((resolve) => {
+    let value = null;
+    modal((card, close) => {
+      title(card, opts.title, opts.sub);
+      for (const w of opts.warnings || []) {
+        card.appendChild(h('div', 'background:#2a1d1d;border:1px solid #5c2a2a;color:#ffb0b0;'
+          + 'border-radius:8px;padding:9px 11px;margin-bottom:10px;font-size:12px', '⚠ ' + w));
+      }
+      const stack = h('div', 'display:flex;flex-direction:column;gap:8px;margin-bottom:14px');
+      for (const c of opts.choices) {
+        const b = h('button', 'text-align:left;border-radius:8px;padding:10px 12px;cursor:pointer;'
+          + 'font-size:13px;line-height:1.45;'
+          + (c.primary
+            ? 'background:#1e2a44;border:1px solid #3a5a8a;color:#e6e8ea;'
+            : 'background:#12161c;border:1px solid #262b33;color:#e6e8ea;'));
+        b.appendChild(h('div', 'font-weight:600', c.label));
+        if (c.hint) b.appendChild(h('div', 'color:#8a929c;font-size:11.5px', c.hint));
+        b.onclick = () => { value = c.key; close(); };
+        stack.appendChild(b);
+      }
+      card.appendChild(stack);
+      const cancel = h('button', BTN, 'Cancel');
+      cancel.onclick = close;
+      const row = h('div', 'display:flex;justify-content:flex-end');
+      row.appendChild(cancel);
+      card.appendChild(row);
+    }, () => resolve(value));
+  });
+}
+
 // A scrollable list of choices. `rows` are {id, label, meta, actions:[{label,css,fn}]}.
 // Resolves with the chosen id, or null.
 export function askList(opts) {
