@@ -582,14 +582,16 @@ ViewerWindowNode.prototype._push = function () {
   if (cvs.width !== dw || cvs.height !== dh) { cvs.width = dw; cvs.height = dh; }
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, dw, dh);
   if (!this._tex) return;
-  RT.engine.blitToCanvas(this._tex, this._texSize || 1024);
-  const s = Math.min(dw, dh);   // square texture, letterboxed to the window
-  try { ctx.drawImage(RT.engine.canvas, (dw - s) / 2, (dh - s) / 2, s, s); } catch (e) {}
+  const t = imageSize(this._texSize);
+  RT.engine.blitToCanvas(this._tex, t.width, t.height);
+  const s = Math.min(dw / t.width, dh / t.height);   // letterbox, preserving the texture's aspect
+  const iw = t.width * s, ih = t.height * s;
+  try { ctx.drawImage(RT.engine.canvas, (dw - iw) / 2, (dh - ih) / 2, iw, ih); } catch (e) {}
 };
 ViewerWindowNode.prototype.evaluate = function () {
   const h = this.getInputData(0);
   this._tex = h && h.tex ? h.tex : null;
-  this._texSize = h && h.size ? h.size : (this._texSize || 512);
+  this._texSize = h && h.tex ? imageSize(h) : this._texSize;
   if (this._win) this._push();
 };
 ViewerWindowNode.prototype.onRemoved = function () { if (this._win && !this._win.closed) this._win.close(); this._win = null; };

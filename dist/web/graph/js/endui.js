@@ -162,7 +162,17 @@ export function buildEndUserUI(root, config, graph) {
       const node = graph.getNodeById(pv.nodeId);
       const tex = node && node._tex;
       if (!tex) { pv.ctx.clearRect(0, 0, pv.canvas.width, pv.canvas.height); continue; }
-      try { RT.engine.blitToCanvas(tex, PREVIEW_PX); pv.ctx.drawImage(RT.engine.canvas, 0, 0, pv.canvas.width, pv.canvas.height); } catch (e) {}
+      // Blit at the node's own resolution, then letterbox into the square preview
+      // canvas — otherwise a non-square output gets squashed to a square.
+      const out = node._out || {};
+      const tw = out.width || PREVIEW_PX, th = out.height || PREVIEW_PX;
+      const cw = pv.canvas.width, ch = pv.canvas.height;
+      const s = Math.min(cw / tw, ch / th), iw = tw * s, ih = th * s;
+      try {
+        RT.engine.blitToCanvas(tex, tw, th);
+        pv.ctx.clearRect(0, 0, cw, ch);
+        pv.ctx.drawImage(RT.engine.canvas, (cw - iw) / 2, (ch - ih) / 2, iw, ih);
+      } catch (e) {}
     }
   };
 }

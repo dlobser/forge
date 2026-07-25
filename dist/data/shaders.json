@@ -43,6 +43,12 @@
       "vert": null
     },
     {
+      "key": "edgeDetect",
+      "js": "/shaders/edgeDetect.js",
+      "frag": "/shaders/edgeDetect.frag",
+      "vert": null
+    },
+    {
       "key": "erosion",
       "js": "/shaders/erosion.js",
       "frag": "/shaders/erosion.frag",
@@ -55,6 +61,30 @@
       "vert": null
     },
     {
+      "key": "floodFill",
+      "js": "/shaders/floodFill.js",
+      "frag": "/shaders/floodFill.frag",
+      "vert": null
+    },
+    {
+      "key": "hexagonalMosaic",
+      "js": "/shaders/hexagonalMosaic.js",
+      "frag": "/shaders/hexagonalMosaic.frag",
+      "vert": null
+    },
+    {
+      "key": "histogramScan",
+      "js": "/shaders/histogramScan.js",
+      "frag": "/shaders/histogramScan.frag",
+      "vert": null
+    },
+    {
+      "key": "kaleidoscope",
+      "js": "/shaders/kaleidoscope.js",
+      "frag": "/shaders/kaleidoscope.frag",
+      "vert": null
+    },
+    {
       "key": "kuramoto",
       "js": "/shaders/kuramoto.js",
       "frag": "/shaders/kuramoto.frag",
@@ -64,6 +94,12 @@
       "key": "noise",
       "js": "/shaders/noise.js",
       "frag": "/shaders/noise.frag",
+      "vert": null
+    },
+    {
+      "key": "rayMarching",
+      "js": "/shaders/rayMarching.js",
+      "frag": "/shaders/rayMarching.frag",
       "vert": null
     },
     {
