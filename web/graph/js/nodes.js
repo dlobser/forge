@@ -11,6 +11,36 @@ const LG = window.LiteGraph;
 const IMG = 'IMAGE';
 const THUMB_H = 116;
 
+// Snapshot litegraph's bundled node types NOW, at module load — before graphApp/play
+// call clearRegisteredTypes(). registerBuiltins() re-registers a curated few after
+// the Forge catalog, so the useful bundled nodes survive the clear. (litegraph.js is
+// a classic script and has already registered its built-ins by the time this module
+// evaluates.)
+const LG_BUILTINS = Object.assign({}, LG.registered_node_types || {});
+
+// Bundled nodes worth surfacing. The bar: each must output a NUMBER (so it can drive
+// a shader/math pin), ADD something Forge's own math nodes lack, and be safe in a
+// graph a stranger might share. Deliberately excluded after testing:
+//   • math/formula   — runs new Function(authorString); arbitrary JS from a shared
+//                      link is an XSS vector, so never in a share-by-link tool
+//   • logic/*        — output `boolean`, which won't connect to a number pin
+//   • basic/const, math/trigonometry — duplicate Forge's float / sine+cosine nodes
+// What's left are stateful helpers Forge's stateless math model can't easily do:
+const BUILTIN_ALLOW = [
+  'math/rand',          // random value (Forge has no randomness node)
+  'math/tendTo',        // eases toward its input — smooths a jumpy slider
+  'math/accumulate',    // running sum / integrator (needs per-frame state)
+  'basic/watch',        // shows a value on the node face (debug readout)
+];
+
+function registerBuiltins() {
+  for (const type of BUILTIN_ALLOW) {
+    const ctor = LG_BUILTINS[type];
+    if (ctor) LG.registerNodeType(type, ctor);
+    else console.warn('Forge: bundled node not found:', type);
+  }
+}
+
 // copy shader for the Crop/Scale node (resamples its input into a sized texture)
 const CP_VERT = `#version 300 es
 precision highp float; out vec2 vUv;
@@ -753,11 +783,74 @@ SaveNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
 SequenceNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
 
 // ── registration ────────────────────────────────────────────────────────────────
+// ── Control nodes ────────────────────────────────────────────────────────────
+// Input widgets that output a number to drive shader/math pins. Unlike litegraph's
+// bundled widget/* nodes (which draw custom UI with no `widgets` array), these use
+// addWidget, so the Author-UI layer (endui.js) can expose them as real sliders /
+// checkboxes / fields on the published page. That is the whole point: they are the
+// controls a published front-end is built from.
+
+// Slider — a continuous value with an adjustable range. The value widget is named
+// 'value' and never renamed, so an Author-UI binding to it survives save/reload;
+// the display label is set in Author UI, not here. min/max are plain widgets the
+// author simply doesn't expose.
+function SliderNode() {
+  this.addOutput('value', 'number');
+  this.properties = { value: 0.5, min: 0, max: 1 };
+  const p = this.properties;
+  this._slider = this.addWidget('slider', 'value', p.value,
+    (v) => { p.value = v; RT.requestSave(); }, { min: p.min, max: p.max });
+  this.addWidget('number', 'min', p.min, (v) => { p.min = v; this._sync(); RT.requestSave(); }, { step: 0.1 });
+  this.addWidget('number', 'max', p.max, (v) => { p.max = v; this._sync(); RT.requestSave(); }, { step: 0.1 });
+  this.size = [220, 96];
+}
+SliderNode.title = 'Slider';
+SliderNode.prototype._sync = function () {
+  const p = this.properties;
+  if (!this._slider) return;
+  this._slider.options.min = p.min; this._slider.options.max = p.max;
+  p.value = Math.min(p.max, Math.max(p.min, p.value)); this._slider.value = p.value;
+  RT.redraw();
+};
+SliderNode.prototype.evaluate = function () { this.setOutputData(0, this.properties.value); };
+SliderNode.prototype.onConfigure = function () {
+  const p = this.properties;
+  if (this._slider) { this._slider.value = p.value; this._slider.options.min = p.min; this._slider.options.max = p.max; }
+  setWidget(this, 'min', p.min); setWidget(this, 'max', p.max);
+};
+
+// Number — precise scalar entry (drag or type), no range.
+function NumberNode() {
+  this.addOutput('value', 'number');
+  this.properties = { value: 0 };
+  this.addWidget('number', 'value', this.properties.value,
+    (v) => { this.properties.value = v; RT.requestSave(); }, { step: 0.1 });
+  this.size = [180, 60];
+}
+NumberNode.title = 'Number';
+NumberNode.prototype.evaluate = function () { this.setOutputData(0, this.properties.value); };
+NumberNode.prototype.onConfigure = function () { setWidget(this, 'value', this.properties.value); };
+
+// Toggle — outputs 1 or 0, so it can gate a shader float/bool pin.
+function ToggleNode() {
+  this.addOutput('value', 'number');
+  this.properties = { value: false };
+  this.addWidget('toggle', 'value', this.properties.value,
+    (v) => { this.properties.value = v; RT.requestSave(); });
+  this.size = [180, 60];
+}
+ToggleNode.title = 'Toggle';
+ToggleNode.prototype.evaluate = function () { this.setOutputData(0, this.properties.value ? 1 : 0); };
+ToggleNode.prototype.onConfigure = function () { setWidget(this, 'value', this.properties.value); };
+
 export function registerNodes() {
   LG.registerNodeType('forge/source', SourceNode);
   LG.registerNodeType('forge/import', ImportNode);
   LG.registerNodeType('forge/url_image', UrlImageNode);
   LG.registerNodeType('forge/crop_scale', CropScaleNode);
+  LG.registerNodeType('forge/control/slider', SliderNode);
+  LG.registerNodeType('forge/control/number', NumberNode);
+  LG.registerNodeType('forge/control/toggle', ToggleNode);
   LG.registerNodeType('forge/depth', DepthNode);
   LG.registerNodeType('forge/viewer', ViewerNode);
   LG.registerNodeType('forge/viewer_window', ViewerWindowNode);
@@ -767,4 +860,5 @@ export function registerNodes() {
   for (const def of RT.shaderDefs) makeShaderNode(def);
   for (const wf of RT.workflows) makeAiNode(wf);
   for (const m of RT.mathDefs) makeMathNode(m);
+  registerBuiltins();
 }

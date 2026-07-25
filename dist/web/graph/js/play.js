@@ -5,7 +5,9 @@
 // hood. It is read-only w.r.t. graph.json — RT.requestSave is a no-op, so an
 // end-user's slider tweaks never overwrite the author's saved graph.
 import { ShaderEngine } from './engine.js';
-import { api } from '/web/js/api.js';
+// relative specifier: resolves against THIS file's own URL, not wherever the page
+// is mounted, so it works under any subfolder
+import { api } from '../../js/api.js';
 import { RT } from './runtime.js';
 import { registerNodes } from './nodes.js';
 import { loadShaderDefs, normalizeDefs, loadMathDefs, evalOnce } from './boot.js';

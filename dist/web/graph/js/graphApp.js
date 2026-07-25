@@ -3,13 +3,21 @@
 // creates the litegraph canvas, drives a single rAF loop (evaluate the graph in
 // topological order, then redraw), and persists the graph to projects/<p>/graph.json.
 import { ShaderEngine } from './engine.js';
-import { api } from '/web/js/api.js';
+// relative specifier: resolves against THIS file's own URL, not wherever the page
+// is mounted, so it works under any subfolder
+import { api } from '../../js/api.js';
 import { RT } from './runtime.js';
 import { registerNodes } from './nodes.js';
 
 const LG = window.LiteGraph;
 const $ = (id) => document.getElementById(id);
 let t0 = performance.now();
+
+// See boot.js for why this exists: the API bakes/serves shader & math-node paths
+// as root-absolute strings, which break under a subfolder-mounted static build
+// (and can't be fixed by the fetch shim, since dynamic import() bypasses it).
+const SITE_ROOT = new URL('../../../', import.meta.url);
+const siteURL = (absPath) => new URL(absPath.replace(/^\//, ''), SITE_ROOT);
 
 // ── toast ──────────────────────────────────────────────────────────────────────
 function toast(msg, kind) {
@@ -21,14 +29,14 @@ function toast(msg, kind) {
 // ── shader defs (mirror of state.loadShaderDefs) ───────────────────────────────
 async function loadShaderDefs() {
   const { shaders } = await api.shaders();
-  const defVert = await (await fetch('/shaders/_fullscreen.vert')).text();
+  const defVert = await (await fetch(siteURL('/shaders/_fullscreen.vert'))).text();
   const defs = [];
   for (const s of shaders) {
     try {
-      const mod = await import(s.js + '?t=' + Date.now());
+      const mod = await import(siteURL(s.js).href + '?t=' + Date.now());
       const def = mod.default || {};
-      const fragSrc = s.frag ? await (await fetch(s.frag)).text() : '';
-      const vertSrc = s.vert ? await (await fetch(s.vert)).text() : defVert;
+      const fragSrc = s.frag ? await (await fetch(siteURL(s.frag))).text() : '';
+      const vertSrc = s.vert ? await (await fetch(siteURL(s.vert))).text() : defVert;
       defs.push({ key: s.key, def, vertSrc, fragSrc });
     } catch (e) { console.warn('shader load failed', s.key, e); }
   }
@@ -50,7 +58,7 @@ async function loadMathDefs() {
   try { list = (await (await fetch('/api/mathnodes')).json()).mathnodes || []; } catch (e) { return []; }
   const defs = [];
   for (const m of list) {
-    try { const mod = await import(m.js + '?t=' + Date.now()); defs.push({ key: m.key, def: mod.default || {} }); }
+    try { const mod = await import(siteURL(m.js).href + '?t=' + Date.now()); defs.push({ key: m.key, def: mod.default || {} }); }
     catch (e) { console.warn('math node load failed', m.key, e); }
   }
   return defs;
@@ -61,6 +69,9 @@ function evalOnce(advance) {
   const order = RT.graph.computeExecutionOrder(false, false);
   for (const n of order) {
     if (n.evaluate) { try { n.evaluate(RT); } catch (e) { console.error('node error', n.title, e); } }
+    // bundled litegraph nodes use onExecute() instead of Forge's evaluate(RT);
+    // running them here lets curated built-ins flow numbers into shader pins
+    else if (n.onExecute) { try { n.onExecute(); } catch (e) {} }
   }
 }
 

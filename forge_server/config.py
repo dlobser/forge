@@ -92,12 +92,25 @@ def _merge(base: Dict[str, Any], over: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ── directory helpers ────────────────────────────────────────────────────────
+def _resolve_dir(configured: str, fallback_name: str) -> Path:
+    """The configured path if it exists, else the copy that ships beside the repo.
+
+    settings.json is tracked and stores absolute paths, so a fresh clone (or a repo
+    moved to a new location) points these at wherever the file was last saved — a
+    directory that no longer exists here. Falling back to ROOT/<name> keeps the
+    server runnable anywhere without editing tracked settings."""
+    p = Path(configured) if configured else None
+    if p is not None and p.exists():
+        return p
+    return ROOT / fallback_name
+
+
 def workflows_dir(s: Dict[str, Any]) -> Path:
-    return Path(s["paths"]["workflows_dir"])
+    return _resolve_dir(s["paths"].get("workflows_dir"), "Workflows")
 
 
 def shaders_dir(s: Dict[str, Any]) -> Path:
-    return Path(s["paths"]["shaders_dir"])
+    return _resolve_dir(s["paths"].get("shaders_dir"), "shaders")
 
 
 def mathnodes_dir(s: Dict[str, Any] = None) -> Path:
@@ -107,7 +120,12 @@ def mathnodes_dir(s: Dict[str, Any] = None) -> Path:
 
 
 def projects_dir(s: Dict[str, Any]) -> Path:
-    p = Path(s["paths"]["projects_dir"])
+    # Unlike shaders/workflows this is writable and may not exist yet, so an existing
+    # configured path wins; otherwise fall back to ROOT/projects and create it.
+    configured = s["paths"].get("projects_dir")
+    p = Path(configured) if configured else None
+    if p is None or not p.exists():
+        p = ROOT / "projects"
     p.mkdir(parents=True, exist_ok=True)
     return p
 

@@ -257,15 +257,33 @@ def inject_scripts(html: str, source_name: str, before: List[str],
     return html
 
 
+def rewrite_root_refs(html: str) -> str:
+    """Convert this build's own root-absolute asset tags (<script src="/web/…">,
+    <link href="/js/…">) to plain RELATIVE references.
+
+    The source HTML (web/graph/index.html, play.html) is authored for the desktop
+    server, which mounts /web, /shaders, /mathnodes at domain root. This static
+    build moves index.html/play.html to the build's own root while keeping web/ as
+    a sibling — a fixed layout that never changes regardless of where the whole
+    dist/ folder is later placed (domain root, or a subfolder of a bigger site, e.g.
+    a portfolio). A relative reference resolves against wherever the CURRENT
+    document is, so dropping the leading slash makes these tags self-relocating
+    with no configuration, instead of needing a --base flag to get right.
+    Scoped to our own namespaces only — never touches an author's own tags."""
+    for ns in ("web", "js"):
+        html = html.replace(f'src="/{ns}/', f'src="{ns}/')
+        html = html.replace(f'href="/{ns}/', f'href="{ns}/')
+    return html
+
+
 def write_pages(dist: Path, mode: str) -> None:
     """index.html (+ play.html in editor builds), with the shim wired in."""
     graph_dir = ROOT / "web" / "graph"
     player = (graph_dir / "play.html").read_text(encoding="utf-8")
 
     if mode == "player":
-        (dist / "index.html").write_text(
-            inject_scripts(player, "play.html", ["/js/static-shim.js"], []),
-            encoding="utf-8")
+        html = inject_scripts(player, "play.html", ["js/static-shim.js"], [])
+        (dist / "index.html").write_text(rewrite_root_refs(html), encoding="utf-8")
         return
 
     editor = (graph_dir / "index.html").read_text(encoding="utf-8")
@@ -279,15 +297,16 @@ def write_pages(dist: Path, mode: str) -> None:
     if not n:
         print("  ! topbar 'classic' link not found; leaving links untouched")
 
-    (dist / "index.html").write_text(
-        inject_scripts(editor, "graph/index.html",
-                       ["/js/forge-store.js", "/js/static-shim.js"],
-                       ["/web/graph/js/webeditor.js"]),
-        encoding="utf-8")
-    (dist / "play.html").write_text(
-        inject_scripts(player, "play.html",
-                       ["/js/forge-store.js", "/js/static-shim.js"], []),
-        encoding="utf-8")
+    editor_html = inject_scripts(
+        editor, "graph/index.html",
+        ["js/forge-store.js", "js/static-shim.js"],
+        ["web/graph/js/webeditor.js"])
+    (dist / "index.html").write_text(rewrite_root_refs(editor_html), encoding="utf-8")
+
+    player_html = inject_scripts(
+        player, "play.html",
+        ["js/forge-store.js", "js/static-shim.js"], [])
+    (dist / "play.html").write_text(rewrite_root_refs(player_html), encoding="utf-8")
 
 
 def write_api_shim(dist: Path, mode: str) -> None:
@@ -314,6 +333,15 @@ def export(mode: str, project: str, dist: Path, all_images: bool, clean: bool) -
         graph = json.loads(graph_path.read_text(encoding="utf-8"))
 
     prepare_out(dist, clean)
+
+    # Cache policy. The front-end is plain unhashed files (engine.js, graphApp.js…),
+    # so without this a returning visitor keeps running an OLD deploy's JS against a
+    # NEW deploy's HTML — exactly the stale-module bug that bites during testing.
+    # `must-revalidate` lets the browser reuse a file only after checking it's current
+    # (a cheap 304 when unchanged), so every redeploy is picked up immediately. Netlify
+    # reads `_headers`; Cloudflare Pages reads it too.
+    (dist / "_headers").write_text(
+        "/*\n  Cache-Control: no-cache\n", encoding="utf-8")
 
     # 1. front-end
     n_web = copy_tree(ROOT / "web" / "graph", dist / "web" / "graph",

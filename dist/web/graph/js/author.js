@@ -97,7 +97,10 @@ function openPanel() {
   const persist = () => { RT.graph.extra = RT.graph.extra || {}; RT.graph.extra.endUser = buildConfig(); RT.requestSave(); };
 
   save.onclick = () => { persist(); RT.toast && RT.toast('End-user UI saved', 'good'); close(); };
-  openView.onclick = () => { persist(); window.open('/web/graph/play.html?project=' + encodeURIComponent(RT.project), '_blank'); };
+  openView.onclick = () => { persist(); // relative — play.html always sits next to index.html, whether that's the
+// desktop app's /web/graph/ or a static build's own root, so this needs no
+// knowledge of where the page is mounted
+window.open('play.html?project=' + encodeURIComponent(RT.project), '_blank'); };
 }
 
 // wire the topbar button (DOM is ready: this module is deferred)
@@ -334,7 +337,10 @@ if (window.LiteGraph && window.LiteGraph.LGraphCanvas) {
     subItems.push({
       content: "Open published view ↗",
       callback: function() {
-        window.open('/web/graph/play.html?project=' + encodeURIComponent(RT.project), '_blank');
+        // relative — play.html always sits next to index.html, whether that's the
+// desktop app's /web/graph/ or a static build's own root, so this needs no
+// knowledge of where the page is mounted
+window.open('play.html?project=' + encodeURIComponent(RT.project), '_blank');
       }
     });
 
