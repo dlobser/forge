@@ -3,6 +3,7 @@
 // fields. Feed an optional image into Distort to deform the field.
 export default {
   name: "SDF",
+  category: "generate",
   inputs: ["distort"],
   inputLabels: { distort: "distort" },
   controls: [

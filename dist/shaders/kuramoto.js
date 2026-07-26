@@ -7,6 +7,7 @@
 // "Image ->" sliders, and lower dt for slower, smoother evolution.
 export default {
   name: "Kuramoto Field",
+  category: "cellular",
   animated: true,
   feedback: true,
   simSize: 256,

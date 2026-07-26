@@ -1,6 +1,7 @@
 // colorGrade — hue/saturation/contrast/brightness with an optional depth mask.
 export default {
   name: "Color Grade",
+  category: "image",
   animated: false,
   inputs: ["color", "depth"],
   // the 2nd input is a mask (smoothstep'd luma), not literally depth — label it so

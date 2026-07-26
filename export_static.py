@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shutil
 import sys
 from pathlib import Path
@@ -287,15 +286,10 @@ def write_pages(dist: Path, mode: str) -> None:
         return
 
     editor = (graph_dir / "index.html").read_text(encoding="utf-8")
-    # The desktop "classic" chain app isn't part of a static build. Point that
-    # button at the player instead, which previews the user's own authored UI.
-    # Matched loosely because the href has moved between / and /classic.
-    editor, n = re.subn(
-        r'<a class="btn" href="/(?:classic)?"[^>]*>classic[^<]*</a>',
-        '<a class="btn" href="play.html" title="Preview your authored UI" '
-        'target="_blank">preview ↗</a>', editor)
-    if not n:
-        print("  ! topbar 'classic' link not found; leaving links untouched")
+    # The topbar used to carry a link to the old chain-based UI, which a static build
+    # has no copy of and which no longer exists in the desktop app either; it is now
+    # gone from index.html, so there is nothing to rewrite here. The authored view is
+    # reached the same way in both builds: File ▸ Open authored view.
 
     editor_html = inject_scripts(
         editor, "graph/index.html",

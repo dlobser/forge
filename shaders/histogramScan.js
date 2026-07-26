@@ -19,6 +19,7 @@
 
 export default {
   name: "Histogram Scan",
+  category: "image",
   animated: false,
 
   inputs: ["color"],

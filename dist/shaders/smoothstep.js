@@ -2,6 +2,7 @@
 // thresholding, contrast, or turning a gradient/SDF into a soft mask.
 export default {
   name: "Smoothstep",
+  category: "image",
   inputs: ["color"],
   controls: [
     { uniform: "uEdge0", label: "Edge 0", type: "range", min: 0, max: 1, step: 0.005, value: 0.25 },

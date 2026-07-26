@@ -8,6 +8,7 @@
 
 export default {
   name: "Kaleidoscope",
+  category: "effect",
   animated: false,
   inputs: ["color"],
   inputLabels: { color: "image" },

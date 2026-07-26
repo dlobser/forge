@@ -15,7 +15,7 @@ and `projects/` directories, plus a couple of root files.
 start.bat                     :: first run makes a venv, installs deps, serves :8191
 ```
 
-Then open <http://127.0.0.1:8191>. ComfyUI is expected separately on
+Then open <http://127.0.0.1:8191> — the node editor. ComfyUI is expected separately on
 `127.0.0.1:8188` (change host/port in ⚙ Settings). Shaders work with no ComfyUI;
 only depth maps and AI generation need it.
 
@@ -71,7 +71,7 @@ it falls back to the shared fullscreen-triangle `_fullscreen.vert`):
 ```
 myEffect.frag    #version 300 es fragment shader
 myEffect.vert    (optional) custom vertex shader
-myEffect.js      manifest: name, animated, inputs, controls
+myEffect.js      manifest: name, category, animated, inputs, controls
 ```
 
 The manifest is an ES module default-export:
@@ -79,8 +79,11 @@ The manifest is an ES module default-export:
 ```js
 export default {
   name: "My Effect",
+  category: "effect",              // which Add-node menu it files under (see below)
   animated: false,                 // true → render loop + sequence/video
+  history: false,                  // true → gets its own previous output as uPrev
   inputs: ["color", "depth"],      // textures it uses
+  inputDefaults: { depth: "gray" },// solid to use when an input is unconnected
   controls: [
     { uniform: "uAmount", label: "Amount", type: "range", min: 0, max: 1, step: 0.01, value: 0.5 },
     { uniform: "uTint",   label: "Tint",   type: "color", value: [1, 1, 1] },
@@ -91,10 +94,36 @@ export default {
 
 Every `controls[].uniform` is set on the program each frame. The engine always
 provides `uColor` (unit 0), `uDepth` (unit 1, grey if unset), `uResolution`
-(vec2), and `uTime` (float, seconds). Files starting with `_` are ignored.
-Restart not required — the front-end re-scans on load. Ships with **depthEdges**
-(Laplacian on depth, mixed over color), **colorGrade** (hue/sat/contrast/bright +
-smoothstep depth mask), and **depthParallax** (animated depth wobble).
+(vec2), `uTime` (float, seconds) and `uFrame`. Files starting with `_` are
+ignored. Restart not required — the front-end re-scans on load.
+
+`category` is the whole node type: a manifest saying `category: "effect"`
+registers as `effect/myEffect`, and litegraph's Add-node menu is built from those
+prefixes. Use one of **input · image · effect · generate · feedback · cellular ·
+depth**, or invent one — a new category just appears in the menu. Graphs saved
+before categories existed name their nodes `forge/shader/<key>`; those names are
+resolved to the new ones on load (see `LEGACY` in nodes.js) and rewritten on the
+next save.
+
+Three kinds of statefulness, and they are not interchangeable:
+
+| flag              | state kept                                    | for |
+| ----------------- | --------------------------------------------- | --- |
+| *(none)*          | none — re-renders when inputs/params change   | ordinary effects |
+| `animated: true`  | none; gets a live `uTime` + an animate toggle | time-driven looks |
+| `history: true`   | its own last output as `uPrev`, at full res   | trails, video feedback, random walk |
+| `feedback: true`  | a square `simSize` RGBA32F grid, 3 `uPass` phases | cellular simulations |
+
+A `history`/`feedback` shader steps once per frame while the transport is playing
+and is frozen by pause. Its state survives changes to its inputs — swapping the
+image feeding a Kuramoto field steers the running simulation instead of reseeding
+it; only ↺ reset, a sim-grid change, or a resolution change starts over.
+
+**Sampling.** Every texture is point-filtered (`NEAREST`), so a long chain doesn't
+accumulate a little bilinear softness at every hop. Shaders that genuinely need
+sub-pixel sampling do their own bilinear fetch — see `bilinear()` in
+videoFeedback.frag — and the **Anti-alias** node (FXAA) is the smoothing pass to
+put at the end of a chain.
 
 ## Tagging a ComfyUI workflow
 

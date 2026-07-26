@@ -3,6 +3,7 @@
 // color image to render it as a 3D heightfield with an orbiting camera.
 export default {
     name: "Raymarch",
+    category: "generate",
     inputs: ["color", "heightMap"],
     inputLabels: { color: "color", heightMap: "height map" },
     controls: [

@@ -2,6 +2,7 @@
 // X/Y offsets default to pins so they can be driven by oscillators.
 export default {
   name: "Depth Parallax",
+  category: "depth",
   animated: true,
   inputs: ["color", "depth"],
   controls: [

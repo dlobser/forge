@@ -4,6 +4,7 @@
 // dimension so it evolves smoothly rather than just sliding.
 export default {
   name: "Noise",
+  category: "generate",
   animated: true,
   inputs: ["distort"],
   inputLabels: { distort: "distort" },

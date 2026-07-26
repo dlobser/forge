@@ -39,9 +39,10 @@ export async function loadShaderDefs() {
 // flatten so nodes read def.inputs/controls/feedback directly but keep .key/src
 export function normalizeDefs(raw) {
   return raw.map((d) => ({
-    key: d.key, name: d.def.name, vertSrc: d.vertSrc, fragSrc: d.fragSrc,
-    inputs: d.def.inputs, inputLabels: d.def.inputLabels, controls: d.def.controls,
-    feedback: d.def.feedback, animated: d.def.animated, simSize: d.def.simSize,
+    key: d.key, name: d.def.name, category: d.def.category, vertSrc: d.vertSrc, fragSrc: d.fragSrc,
+    inputs: d.def.inputs, inputLabels: d.def.inputLabels, inputDefaults: d.def.inputDefaults,
+    controls: d.def.controls, feedback: d.def.feedback, history: d.def.history,
+    animated: d.def.animated, simSize: d.def.simSize,
   }));
 }
 

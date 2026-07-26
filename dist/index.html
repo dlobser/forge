@@ -42,9 +42,6 @@
     #settingsPanel .row{ display:flex; align-items:center; justify-content:space-between; gap:8px; }
     #settingsPanel label{ color:var(--muted); text-transform:uppercase; font-size:10px; letter-spacing:1px; }
     #settingsPanel .hint{ color:var(--muted); font-size:11px; line-height:1.4; }
-    #viewerOverlay{ position:fixed; inset:0; background:#000e; z-index:60; display:flex;
-      align-items:center; justify-content:center; cursor:zoom-out; }
-    #viewerOverlay img{ max-width:94vw; max-height:94vh; image-rendering:auto; }
     [hidden]{ display:none !important; }
   </style>
 </head>
@@ -62,7 +59,7 @@
     <button id="addNodeBtn" class="btn">＋ Add node</button>
     <button id="authorUiBtn" class="btn" title="Define the end-user front-end">Author UI</button>
     <button id="settingsBtn" class="btn" title="Settings">⚙</button>
-    <a class="btn" href="play.html" title="Preview your authored UI" target="_blank">preview ↗</a>
+    <button id="helpBtn" class="btn" title="How Forge works">?</button>
     <span id="comfyDot" class="dot">comfy</span>
   </div>
   <div id="settingsPanel" hidden>
@@ -76,7 +73,7 @@
   <canvas id="graphcanvas" tabindex="1"></canvas>
   <canvas id="glcanvas" width="512" height="512"></canvas>
   <div id="toast"></div>
-  <div id="viewerOverlay" hidden><img id="viewerImg" alt="" /></div>
+  <!-- the fullscreen viewer builds its own overlay on demand (js/liveview.js) -->
 
   <script src="js/forge-store.js"></script>
   <script src="js/static-shim.js"></script>

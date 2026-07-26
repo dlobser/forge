@@ -8,6 +8,7 @@
 // selective-focus effect. Invert flips the mask sense.
 export default {
   name: "Blur",
+  category: "effect",
   animated: false,
   inputs: ["color", "depth"],
   inputLabels: { color: "image", depth: "mask" },

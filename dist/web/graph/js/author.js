@@ -6,6 +6,7 @@
 // singleton and wires its own button, so graphApp.js stays untouched.
 import { RT } from './runtime.js';
 import { enumerateExposable } from './endui.js';
+import { isViewer } from './nodes.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -282,7 +283,7 @@ if (window.LiteGraph && window.LiteGraph.LGraphCanvas) {
     });
 
     // 2. Preview options if it is a ViewerNode
-    if (node.type === 'forge/viewer') {
+    if (isViewer(node)) {
       const cfg = getEndUserConfig();
       const pIdx = (cfg.previews || []).findIndex((p) => p.nodeId === node.id);
       const isExpPrev = pIdx >= 0;

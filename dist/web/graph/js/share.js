@@ -92,9 +92,11 @@ export function buildEditLink(payload, base) {
 export function inspectShareability(graph) {
   const warnings = [];
   const nodes = (graph && graph.nodes) || [];
+  // Both spellings: node types moved into real categories, but a graph saved before
+  // that (or a share link built from one) still names the old ones.
+  const LOCAL_IMAGE_TYPES = ['input/import', 'input/source', 'forge/import', 'forge/source'];
   const stuck = nodes.filter(function (n) {
-    return (n.type === 'forge/import' || n.type === 'forge/source')
-      && n.properties && n.properties.file;
+    return LOCAL_IMAGE_TYPES.indexOf(n.type) >= 0 && n.properties && n.properties.file;
   });
   if (stuck.length) {
     warnings.push(stuck.length + ' image' + (stuck.length > 1 ? 's are' : ' is')

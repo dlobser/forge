@@ -3,6 +3,7 @@
 // or noise into "distort". Unconnected distort → flat grey → no warp.
 export default {
   name: "Distort",
+  category: "effect",
   inputs: ["color", "distort"],
   inputLabels: { color: "color", distort: "distort" },
   controls: [

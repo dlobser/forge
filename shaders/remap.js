@@ -4,6 +4,7 @@
 // force seamless wrapping. Wire the same image into both inputs for a self-remap.
 export default {
   name: "Remap",
+  category: "image",
   inputs: ["image", "texture"],
   inputLabels: { image: "image", texture: "texture" },
   controls: [

@@ -2,9 +2,9 @@
 // Feedback Deform — iterative domain warp. Starting at the current pixel, march
 // along the gradient of the B&W field (DEPTH slot), blending the colour sampled
 // at each step back toward the running colour (uFeedback). Repeating this is the
-// single-pass equivalent of feeding a deformed frame back into itself. uSwirl
-// rotates the step direction over time so the flow animates; uDecay shrinks each
-// successive step so the march settles instead of running away.
+// single-pass equivalent of feeding a deformed frame back into itself. uAngle
+// rotates the step direction (drive it from a node to animate the flow); uDecay
+// shrinks each successive step so the march settles instead of running away.
 precision highp float;
 
 in vec2 vUv;
@@ -18,7 +18,8 @@ uniform float uStrength;        // base step size (uv per unit gradient)
 uniform float uIterations;      // how many warp steps to accumulate
 uniform float uFeedback;        // how strongly each step blends in (0..1)
 uniform float uDecay;           // per-step shrink of the step size
-uniform float uSwirl;           // time-driven rotation of the flow
+uniform float uAngle;           // static rotation of the flow (drive this from a node)
+uniform float uSwirl;           // extra time-driven spin, turns per second
 uniform float uSampleRadius;    // texel offset for the gradient estimate
 
 const int MAX_ITER = 48;
@@ -36,8 +37,11 @@ vec2 gradient(vec2 uv) {
 void main() {
     int iters = int(uIterations + 0.5);
 
-    // Time-driven rotation matrix applied to each step's push direction.
-    float ang = uTime * uSwirl;
+    // Rotation applied to each step's push direction. uAngle is a plain value you
+    // set (or pin an Oscillator / Sine node to, which is the point — the animation
+    // then lives in a node you can see and re-time, not buried in here). uSwirl adds
+    // the old built-in spin on top and defaults to 0.
+    float ang = uAngle * 6.28318530718 + uTime * uSwirl;
     float ca = cos(ang), sa = sin(ang);
     mat2 rot = mat2(ca, -sa, sa, ca);
 

@@ -10,6 +10,7 @@
 // color (vec3, value is [r,g,b] 0..1), bool (float 0/1), select (float).
 export default {
   name: "Depth Edges",
+  category: "depth",
   animated: false,
   inputs: ["color", "depth"],
   controls: [

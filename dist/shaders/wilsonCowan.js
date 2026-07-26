@@ -7,6 +7,7 @@
 // and perpendicular coupling on a packed 4x4 orientation tile layout.
 export default {
   name: "Wilson-Cowan V1",
+  category: "cellular",
   animated: true,
   feedback: true,
   simSize: 256,

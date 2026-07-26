@@ -224,6 +224,86 @@ async function openGraph() {
   }
 }
 
+// ── gallery files ────────────────────────────────────────────────────────────
+// Images arrive with machine-made names (MyProj__Color Grade_3.png), which is fine
+// until you have forty of them and have to pick one out of a Source node's dropdown.
+// Renaming here also rewrites the open graph's references, so a Source or Import node
+// pointing at the old name doesn't quietly go blank.
+function retargetImageRefs(oldName, newName) {
+  let touched = 0;
+  for (const n of (RT.graph && RT.graph._nodes) || []) {
+    const p = n.properties || {};
+    for (const k of ['file', 'output']) {
+      if (p[k] === oldName) {
+        p[k] = newName;
+        const w = (n.widgets || []).find((x) => x.name === 'image');
+        if (w) { if (w.options) w.options.values = RT.gallery.map((i) => i.filename); w.value = newName; }
+        touched++;
+      }
+    }
+  }
+  if (touched) { RT.requestSave(); RT.redraw(); }
+  return touched;
+}
+
+async function manageFiles() {
+  await RT.refreshGallery();
+  const rows = (RT.gallery || []).map((img) => ({
+    id: img.filename,
+    label: img.filename,
+    meta: (img.kind || 'import') + '  ·  ' + Math.round((img.size || 0) / 1024) + ' KB',
+    actions: [
+      {
+        label: 'Rename',
+        fn: async (row, close) => {
+          close();
+          const nn = await askText({
+            title: 'Rename image',
+            sub: 'Nodes in this graph that use it are updated to match. Leave the extension off to keep the current one.',
+            value: row.id, ok: 'Rename',
+          });
+          if (!nn || nn === row.id) return manageFiles();
+          try {
+            const r = await jpost('/api/image/rename',
+              { project: RT.project, file: row.id, new_name: nn });
+            await RT.refreshGallery();
+            const n = retargetImageRefs(row.id, r.filename);
+            toast('Renamed to “' + r.filename + '”'
+              + (n ? ' · updated ' + n + ' node' + (n === 1 ? '' : 's') : ''), 'good');
+          } catch (e) { toast('Rename failed: ' + e.message, 'bad'); }
+          manageFiles();
+        },
+      },
+      {
+        label: 'Delete', css: BTN_DANGER,
+        fn: async (row, close) => {
+          close();
+          if (await askConfirm({
+            title: 'Delete “' + row.id + '”?',
+            sub: 'The file and its sidecar are removed from this project. Nodes using it will show a load error.',
+            ok: 'Delete', danger: true,
+          })) {
+            try {
+              await jpost('/api/image/delete', { project: RT.project, file: row.id });
+              await RT.refreshGallery();
+              toast('Deleted “' + row.id + '”', 'good');
+            } catch (e) { toast('Delete failed: ' + e.message, 'bad'); }
+          }
+          manageFiles();
+        },
+      },
+    ],
+  }));
+
+  await askList({
+    title: 'Images',
+    sub: 'The gallery for project “' + RT.project + '”. Source and Import nodes pick from this list.',
+    rows,
+    empty: 'No images yet — File ▸ Import Image…',
+    buttons: [{ label: 'Import Image…', primary: true, fn: (close) => { close(); const el = $('importInput'); if (el) el.click(); } }],
+  });
+}
+
 // ── version history ──────────────────────────────────────────────────────────
 async function versionHistory() {
   let data;
@@ -444,6 +524,7 @@ function items() {
     '-',
     { label: 'New Project…', fn: () => RT.newProject && RT.newProject() },
     { label: 'Import Image…', fn: () => $('importInput') && $('importInput').click() },
+    { label: 'Images… (rename / delete)', fn: manageFiles, disabled: !D },
     '-',
     { label: 'Share link…', fn: openShare },
     {

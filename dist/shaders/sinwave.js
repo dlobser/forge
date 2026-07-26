@@ -4,6 +4,7 @@
 // Multiply .5 / Add .5 map the wave to 0..1 instead of -1..1.
 export default {
   name: "Sine Wave",
+  category: "generate",
   animated: true,
   inputs: ["color"],
   controls: [

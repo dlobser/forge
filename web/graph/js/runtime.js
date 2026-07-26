@@ -17,6 +17,14 @@ export const RT = {
   playing: true,        // global play/pause: when false, time + feedback freeze
   advance: true,        // whether this eval should step time/feedback
   capturing: false,
+
+  // Per-frame callbacks, run by whichever page owns the rAF loop (graphApp or
+  // play). The live fullscreen overlay uses this to keep drawing while it's up —
+  // it can't own a loop of its own without a second eval pass.
+  hooks: new Set(),
+  addHook(fn) { this.hooks.add(fn); return () => this.hooks.delete(fn); },
+  runHooks() { for (const fn of this.hooks) { try { fn(); } catch (e) {} } },
+
   comfyOk: false,
   checkComfy() {},      // assigned by graphApp; re-checks ComfyUI reachability
   // default per-node render size (square). Per-node override lives in

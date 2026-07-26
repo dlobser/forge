@@ -1,6 +1,7 @@
 // gradient — linear or radial gradient with position sliders, multi-color stops & alpha.
 export default {
   name: "Gradient",
+  category: "generate",
   inputs: ["distort"],
   inputLabels: { distort: "distort" },
   controls: [

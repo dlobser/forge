@@ -1,6 +1,7 @@
 // key — Chroma and Luma keying with sample picking, threshold/softness, expand/choke, and despill.
 export default {
   name: "Key",
+  category: "image",
   inputs: ["color", "bg"],
   inputLabels: { color: "Color", bg: "Background" },
   controls: [

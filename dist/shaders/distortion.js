@@ -8,6 +8,7 @@
 //                (positive Strength). Negative Strength pulls them inward.
 export default {
   name: "Distortion",
+  category: "effect",
   animated: false,
   inputs: ["color", "depth"],
   controls: [

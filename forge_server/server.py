@@ -162,6 +162,55 @@ def api_thumb(project: str = Query(...), file: str = Query(...), size: int = 256
     return FileResponse(t, headers={"Cache-Control": "no-cache"})
 
 
+# ── remote image proxy ───────────────────────────────────────────────────────
+# The URL Image node textures a remote image, which WebGL only allows if the host
+# sends CORS headers. Plenty of hosts don't — and some (imgur among them) refuse a
+# request whose Referer is a localhost dev server, so the same URL that works from
+# a deployed static build fails here. Re-serving the bytes from this origin makes
+# the request same-origin, where CORS doesn't apply at all. The front-end only
+# reaches for this after a direct load has already failed.
+#
+# Scoped deliberately: http(s) only, and never a private/loopback address, so this
+# can't be used to read the machine's own network from the browser.
+@app.get("/api/proxy_image")
+def api_proxy_image(url: str = Query(..., min_length=8, max_length=4096)):
+    import ipaddress
+    import socket
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise HTTPException(400, "only http(s) URLs")
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, None)
+    except OSError:
+        raise HTTPException(502, "cannot resolve host")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            raise HTTPException(403, "refusing to proxy a private address")
+
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Forge)",
+        "Accept": "image/*,*/*;q=0.8",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            ctype = r.headers.get("Content-Type", "application/octet-stream")
+            data = r.read(64 * 1024 * 1024)
+    except urllib.error.HTTPError as e:
+        raise HTTPException(502, f"remote host said {e.code}")
+    except (urllib.error.URLError, OSError) as e:
+        raise HTTPException(502, f"fetch failed: {e}")
+    if not ctype.startswith("image/"):
+        raise HTTPException(415, f"not an image ({ctype})")
+    return Response(content=data, media_type=ctype,
+                    headers={"Cache-Control": "public, max-age=3600",
+                             "Access-Control-Allow-Origin": "*"})
+
+
 class DepthReq(BaseModel):
     project: Optional[str] = None
     file: str
@@ -185,6 +234,30 @@ def api_depth(req: DepthReq):
 class DeleteReq(BaseModel):
     project: Optional[str] = None
     file: str
+
+
+class RenameImageReq(BaseModel):
+    project: Optional[str] = None
+    file: str
+    new_name: str
+
+
+# Renaming an image breaks any node that referenced it by name, so the front-end
+# rewrites those references in the open graph after a successful rename — see
+# renameFile() in filemenu.js. Graphs in OTHER documents keep the old name and will
+# report a failed load, which is honest: there is no way to find every graph in every
+# project that might mention this file.
+@app.post("/api/image/rename")
+def api_rename_image(req: RenameImageReq):
+    project = req.project or current_project()
+    try:
+        return projects.rename_image(_settings, project, req.file, req.new_name)
+    except FileNotFoundError:
+        raise HTTPException(404, f"no image named {req.file!r}")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except OSError as e:
+        raise HTTPException(500, f"rename failed: {e}")
 
 
 @app.post("/api/image/delete")

@@ -24,6 +24,7 @@
 
 export default {
   name: "Flood Fill",
+  category: "cellular",
   animated: false,
   feedback: true,
   alwaysAdvance: true,

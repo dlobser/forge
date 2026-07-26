@@ -19,6 +19,21 @@ precision highp float;
 in vec2 vUv; out vec4 o; uniform sampler2D uColor;
 void main(){ o = texture(uColor, vUv); }`;
 
+// Downsampling copy, for thumbnails and previews. Every texture in Forge is
+// point-filtered (see allocTexture), so shrinking a 2048² output into a 116px
+// node thumbnail with the plain copy shader would point-sample one pixel in 18 and
+// sparkle. A 3×3 box over the *destination* pixel footprint is cheap and stable.
+const DOWN_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv; out vec4 o; uniform sampler2D uColor; uniform vec2 uStep;
+void main(){
+  vec4 s = vec4(0.0);
+  for (int y = -1; y <= 1; y++)
+    for (int x = -1; x <= 1; x++)
+      s += texture(uColor, vUv + vec2(float(x), float(y)) * uStep);
+  o = s / 9.0;
+}`;
+
 export class ShaderEngine {
   constructor(canvas) {
     this.canvas = canvas;
@@ -28,13 +43,19 @@ export class ShaderEngine {
     this.vao = gl.createVertexArray();
     this.programs = new Map();
     this.texCache = new WeakMap();
-    this.solid = { gray: this._solid([128, 128, 128, 255]), black: this._solid([0, 0, 0, 255]) };
+    this.solid = {
+      gray: this._solid([128, 128, 128, 255]),
+      black: this._solid([0, 0, 0, 255]),
+      white: this._solid([255, 255, 255, 255]),
+    };
     this.fbo = gl.createFramebuffer();
     this.fboTex = null; this.fboSize = '';
     this.floatRenderable = !!gl.getExtension('EXT_color_buffer_float');
     this.simFbo = gl.createFramebuffer();
     this.nodeFbo = gl.createFramebuffer();   // for renderToTexture
+    this.copyFbo = gl.createFramebuffer();   // for texture→texture copies (history)
     this.sims = new Map();
+    this.hist = new Map();                   // full-resolution history buffers
   }
 
   ensureProgram(key, vertSrc, fragSrc) {
@@ -72,11 +93,25 @@ export class ShaderEngine {
   }
 
   // ── textures ─────────────────────────────────────────────────────────────
+  // Everything is POINT (NEAREST) filtered, on purpose: hardware bilinear on every
+  // intermediate texture softens a chain of effects a little at every hop, and the
+  // blur compounds. Sampling stays crisp and any smoothing is explicit — either the
+  // Anti-alias node at the end of the chain, or a shader that does its own bilinear
+  // fetch where subpixel sampling is the whole point (see `bilinear()` in
+  // videoFeedback.frag / randomWalk.frag).
+  _setSampling(target) {
+    const gl = this.gl;
+    gl.texParameteri(target, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(target, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(target, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(target, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  }
+
   _solid(rgba) {
     const gl = this.gl, t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array(rgba));
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    this._setSampling(gl.TEXTURE_2D);
     return t;
   }
 
@@ -88,19 +123,30 @@ export class ShaderEngine {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this._setSampling(gl.TEXTURE_2D);
     this.texCache.set(img, t);
     return t;
   }
 
-  // allocate a node's own RGBA8 output texture
+  // Re-upload a live source (a <video> element) into its cached texture. Same
+  // texture object every frame, so downstream handles stay valid.
+  texFromVideo(video) {
+    const gl = this.gl;
+    if (!video || !video.videoWidth) return this.solid.black;
+    let t = this.texCache.get(video);
+    if (!t) { t = gl.createTexture(); this.texCache.set(video, t); }
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, video);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    this._setSampling(gl.TEXTURE_2D);
+    return t;
+  }
+
   // A node's own output texture. RGBA16F (half-float) so gradients keep their
   // precision through a chain of shaders instead of re-quantising to 8 bit at every
   // pass (and it can hold values <0 / >1, e.g. Sine Wave). Falls back to RGBA8 if
-  // float render targets aren't supported. RGBA16F is linearly filterable in WebGL2.
+  // float render targets aren't supported.
   allocTexture(width, height = width) {
     const gl = this.gl, t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
@@ -108,10 +154,7 @@ export class ShaderEngine {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.HALF_FLOAT, null);
     else
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    this._setSampling(gl.TEXTURE_2D);
     return t;
   }
 
@@ -138,7 +181,14 @@ export class ShaderEngine {
       let tex;
       if (spec.inputTextures && spec.inputTextures[name]) tex = spec.inputTextures[name];   // graph: upstream node texture
       else if (spec.flowInput === name && spec.flowTex) tex = spec.flowTex;
-      else tex = this.texFor(this._inputImage(spec, name), name === 'color' ? 'black' : 'gray');
+      else {
+        // An unconnected input falls back to a 1×1 solid. Which solid matters: a
+        // neutral warp field is grey (0.5 = no displacement) but a neutral mask is
+        // black (replace nothing), so a manifest can name its own per-input default.
+        const fallback = (spec.inputDefaults && spec.inputDefaults[name])
+          || (name === 'color' ? 'black' : 'gray');
+        tex = this.texFor(this._inputImage(spec, name), fallback);
+      }
       gl.bindTexture(gl.TEXTURE_2D, tex);
       const loc = this._loc(info, this._uniformForInput(name));
       if (loc !== null) gl.uniform1i(loc, unit);
@@ -164,8 +214,9 @@ export class ShaderEngine {
   }
 
   // ── single-pass draw (draws to whatever framebuffer is currently bound) ─────
-  _draw(spec, w, h) {
+  _draw(spec, w, h, targetTex) {
     if (spec.feedback) return this._drawFeedback(spec, w, h);
+    if (spec.history) return this._drawHistory(spec, w, h, targetTex);
     const gl = this.gl;
     const info = this.ensureProgram(spec.key, spec.vertSrc, spec.fragSrc);
     gl.useProgram(info.prog);
@@ -173,9 +224,88 @@ export class ShaderEngine {
     this._bindImages(info, spec);
     gl.uniform2f(this._loc(info, 'uResolution'), w, h);
     gl.uniform1f(this._loc(info, 'uTime'), spec.time || 0);
+    gl.uniform1f(this._loc(info, 'uFrame'), spec.frame || 0);
     this._setControls(info, spec);
     gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
+  }
+
+  // ── history feedback: a shader that sees its OWN previous output ─────────────
+  // `history: true` in a manifest. Unlike `feedback: true` (a square, low-res
+  // RGBA32F simulation grid with three uPass phases), this keeps one buffer at the
+  // node's full output resolution and binds it as `uPrev`. That is what video
+  // feedback / trails want: the picture itself is the state.
+  //
+  // The node renders into its own output texture as usual, then — only when time is
+  // advancing — that result is copied into the history buffer for the next frame.
+  // Rendering direct-to-history instead would mean the buffer downstream nodes read
+  // and the buffer we write are the same texture, which is undefined in GL.
+  _drawHistory(spec, w, h, targetTex) {
+    const gl = this.gl;
+    // Read the caller's framebuffer FIRST: clearing the history buffer binds one of
+    // our own, and restoring the wrong one renders the node into its history instead
+    // of into its output.
+    const target = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+    const key = spec.histKey || spec.key;
+    const hist = this._ensureHistory(key, w, h);
+    if (hist.token !== spec.resetToken) { this._clearTexture(hist.tex, w, h); hist.token = spec.resetToken; hist.frame = 0; }
+
+    const info = this.ensureProgram(spec.key, spec.vertSrc, spec.fragSrc);
+    gl.useProgram(info.prog);
+    gl.bindVertexArray(this.vao);
+    const prevUnit = this._bindImages(info, spec);
+    gl.activeTexture(gl.TEXTURE0 + prevUnit);
+    gl.bindTexture(gl.TEXTURE_2D, hist.tex);
+    gl.uniform1i(this._loc(info, 'uPrev'), prevUnit);
+    gl.uniform2f(this._loc(info, 'uResolution'), w, h);
+    gl.uniform1f(this._loc(info, 'uTime'), spec.time || 0);
+    gl.uniform1f(this._loc(info, 'uFrame'), hist.frame);
+    gl.uniform1f(this._loc(info, 'uFirst'), hist.frame === 0 ? 1.0 : 0.0);
+    this._setControls(info, spec);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
+
+    if (spec.advance && targetTex) { this._copyTexture(targetTex, hist.tex, w, h); hist.frame++; }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+  }
+
+  _ensureHistory(key, w, h) {
+    const gl = this.gl;
+    let hist = this.hist.get(key);
+    if (hist && hist.w === w && hist.h === h) return hist;
+    if (hist) gl.deleteTexture(hist.tex);
+    hist = { w, h, tex: this.allocTexture(w, h), token: null, frame: 0 };
+    this.hist.set(key, hist);
+    return hist;
+  }
+
+  resetHistory(key) {
+    if (key === undefined) { for (const hi of this.hist.values()) hi.token = null; }
+    else { const hi = this.hist.get(key); if (hi) hi.token = null; }
+  }
+
+  _clearTexture(tex, w, h) {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.copyFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+  }
+
+  _copyTexture(srcTex, dstTex, w, h) {
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.copyFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dstTex, 0);
+    const info = this.ensureProgram('__copy', COPY_VERT, COPY_FRAG);
+    gl.useProgram(info.prog); gl.bindVertexArray(this.vao);
+    gl.viewport(0, 0, w, h);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, srcTex);
+    gl.uniform1i(this._loc(info, 'uColor'), 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   }
@@ -260,14 +390,24 @@ export class ShaderEngine {
     const gl = this.gl;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.nodeFbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, targetTex, 0);
-    this._draw(spec, width, height);
+    this._draw(spec, width, height, targetTex);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
-  // draw a texture into the visible gl canvas (so a node can ctx.drawImage it)
-  blitToCanvas(tex, width, height = width) {
-    if (this.canvas.width !== width || this.canvas.height !== height) { this.canvas.width = width; this.canvas.height = height; }
-    this._blit(tex, null, width, height);
+  // Draw a texture into the visible gl canvas (so a node can ctx.drawImage it).
+  // `maxDim` caps the canvas — a 2048² output going into a 116px thumbnail should
+  // cost a 116px draw, not a 2048px one. That cap is the difference between a
+  // paused 2K graph being instant and being a slideshow.
+  blitToCanvas(tex, width, height = width, maxDim) {
+    let w = Math.max(1, width | 0), h = Math.max(1, height | 0);
+    if (maxDim && (w > maxDim || h > maxDim)) {
+      const s = maxDim / Math.max(w, h);
+      w = Math.max(1, Math.round(w * s)); h = Math.max(1, Math.round(h * s));
+    }
+    if (this.canvas.width !== w || this.canvas.height !== h) { this.canvas.width = w; this.canvas.height = h; }
+    if (w < width || h < height) this._blitDown(tex, null, w, h);
+    else this._blit(tex, null, w, h);
+    return { width: w, height: h };
   }
 
   // draw a texture into a target framebuffer (null = canvas)
@@ -279,6 +419,21 @@ export class ShaderEngine {
     gl.viewport(0, 0, width, height);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.uniform1i(this._loc(info, 'uColor'), 0);
+    gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
+  }
+
+  // box-filtered blit, for when the destination is smaller than the source
+  _blitDown(tex, targetFbo, width, height = width) {
+    const gl = this.gl;
+    const info = this.ensureProgram('__copyDown', COPY_VERT, DOWN_FRAG);
+    gl.useProgram(info.prog); gl.bindVertexArray(this.vao);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targetFbo);
+    gl.viewport(0, 0, width, height);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(this._loc(info, 'uColor'), 0);
+    gl.uniform2f(this._loc(info, 'uStep'), 0.5 / width, 0.5 / height);
     gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
@@ -319,17 +474,53 @@ export class ShaderEngine {
   }
 }
 
+// ── image loading ──────────────────────────────────────────────────────────────
+// WebGL will not texture a cross-origin image unless the response carries CORS
+// headers, so every load asks for one (crossOrigin='anonymous'). Three things then
+// commonly break a load that *should* work, and each has a different fix:
+//
+//   1. Hotlink protection. Imgur and friends look at the Referer header and serve a
+//      placeholder — or nothing — when a page they don't like embeds their image.
+//      A page on http://127.0.0.1:8191 is exactly the kind of referer that gets
+//      refused, which is why the same URL works from a deployed site and fails on
+//      the local server. Fix: send no referer at all.
+//   2. A cached response from an earlier no-CORS fetch of the same URL, which has
+//      no Access-Control-Allow-Origin recorded. Fix: retry past the cache.
+//   3. A host that genuinely sends no CORS header. Nothing the browser can do —
+//      but the Forge server can fetch the bytes and re-serve them same-origin,
+//      which is CORS-free by definition. Only available with the desktop backend;
+//      on a static host attempt 1 is normally the one that works anyway.
+function tryLoad(url, { bust } = {}) {
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.referrerPolicy = 'no-referrer';        // (1) don't get hotlink-blocked
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error('image load failed: ' + url));
+    im.src = bust ? url + (url.includes('?') ? '&' : '?') + '_forge=' + Date.now() : url;
+  });
+}
+
+const isCrossOrigin = (url) => {
+  try { return new URL(url, location.href).origin !== location.origin; }
+  catch (e) { return false; }
+};
+
+const proxyURL = (url) => '/api/proxy_image?url=' + encodeURIComponent(url);
+
 const _imgCache = new Map();
 export function loadImage(url) {
   if (!url) return Promise.resolve(null);
   if (_imgCache.has(url)) return _imgCache.get(url);
-  const p = new Promise((res, rej) => {
-    const im = new Image();
-    im.crossOrigin = 'anonymous';
-    im.onload = () => res(im);
-    im.onerror = () => rej(new Error('image load failed: ' + url));
-    im.src = url;
-  });
+  let p = tryLoad(url);
+  if (isCrossOrigin(url)) {
+    p = p
+      .catch(() => tryLoad(url, { bust: true }))            // (2) past a poisoned cache
+      .catch(() => tryLoad(proxyURL(url)))                  // (3) via the local backend
+      .catch(() => { throw new Error('image load failed (CORS or unreachable): ' + url); });
+  }
   _imgCache.set(url, p);
+  // A failed load must not be remembered, or "reload" can never recover.
+  p.catch(() => { if (_imgCache.get(url) === p) _imgCache.delete(url); });
   return p;
 }

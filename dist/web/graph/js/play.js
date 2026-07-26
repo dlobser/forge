@@ -95,6 +95,7 @@ function addEditButton(payload) {
     RT.advance = true;
     if (!RT.capturing) evalOnce();
     drawPreviews();
+    RT.runHooks();       // the fullscreen viewer draws from here
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

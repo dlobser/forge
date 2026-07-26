@@ -8,6 +8,7 @@
 // seed so the BLACK pixels grow into white instead.
 export default {
   name: "Erosion",
+  category: "effect",
   animated: false,
   inputs: ["color"],
   controls: [

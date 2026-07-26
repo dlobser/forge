@@ -7,6 +7,7 @@
 // the base (matters for the non-symmetric modes like Overlay).
 export default {
   name: "Blend",
+  category: "image",
   animated: false,
   inputs: ["color", "depth"],
   controls: [

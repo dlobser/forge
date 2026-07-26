@@ -5,11 +5,94 @@
 // rAF loop calls node.evaluate(RT) in topological order.
 import { RT } from './runtime.js';
 import { loadImage } from './engine.js';
+import { downloadTexture, openLiveView } from './liveview.js';
 import { addShaderWidgets, addSingleShaderWidget, addAiWidgets, syncShaderWidgets, markDirty } from './widgets.js';
 
 const LG = window.LiteGraph;
 const IMG = 'IMAGE';
 const THUMB_H = 116;
+
+// ── node type names ─────────────────────────────────────────────────────────────
+// Types are "category/name", and litegraph builds its Add-node menu straight from
+// the category half. Everything used to live under one flat `forge/` category, which
+// told you nothing you didn't already know — you are in Forge. Now the category says
+// what the node is FOR (input, image, effect, generate, cellular, feedback, depth,
+// control, output, ai, utility), and shader nodes get theirs from `category` in
+// their own manifest, so adding a shader files it correctly with no changes here.
+export const T = {
+  SOURCE: 'input/source',
+  IMPORT: 'input/import',
+  URL_IMAGE: 'input/url_image',
+  WEBCAM: 'input/webcam',
+  AUDIO: 'input/audio_reactive',
+  CROP: 'image/crop_scale',
+  SLIDER: 'control/slider',
+  NUMBER: 'control/number',
+  TOGGLE: 'control/toggle',
+  DEPTH: 'ai/depth',
+  VIEWER: 'output/viewer',
+  VIEWER_WINDOW: 'output/viewer_window',
+  SAVE: 'output/save',
+  SEQUENCE: 'output/sequence',
+  PASS_THROUGH: 'utility/pass_through',
+};
+
+// Graphs saved before the reshuffle name the old types. Rather than migrate files
+// (share links and exported bundles are out there too, and can't be migrated at
+// all), resolve old names to new ones when a node is created — see
+// installTypeAliases. Re-saving a graph then quietly writes the new names.
+const LEGACY = {
+  'forge/source': T.SOURCE,
+  'forge/import': T.IMPORT,
+  'forge/url_image': T.URL_IMAGE,
+  'forge/crop_scale': T.CROP,
+  'forge/control/slider': T.SLIDER,
+  'forge/control/number': T.NUMBER,
+  'forge/control/toggle': T.TOGGLE,
+  'forge/depth': T.DEPTH,
+  'forge/viewer': T.VIEWER,
+  'forge/viewer_window': T.VIEWER_WINDOW,
+  'forge/save': T.SAVE,
+  'forge/sequence': T.SEQUENCE,
+  'forge/pass_through': T.PASS_THROUGH,
+};
+
+// Type tests that accept both spellings, for the few places outside this file that
+// care what a node is (the Author-UI panel, the published page).
+export const isViewer = (n) => !!n && (n.type === T.VIEWER || n.type === 'forge/viewer');
+export const isSource = (n) => !!n && (n.type === T.SOURCE || n.type === 'forge/source');
+
+const resolveType = (type) => (!LG.registered_node_types[type] && LEGACY[type]) ? LEGACY[type] : type;
+
+let aliasesInstalled = false;
+function installTypeAliases() {
+  if (aliasesInstalled) return;
+  aliasesInstalled = true;
+
+  // Creating a node by an old name gives you the new one…
+  const origCreate = LG.createNode;
+  LG.createNode = function (type, title, options) {
+    return origCreate.call(this, resolveType(type), title, options);
+  };
+
+  // …and loading one does too. This second hook is the one that matters: litegraph
+  // creates the node from the saved type (so the alias above picks the right class)
+  // and then copies the whole saved record onto it — including `type`, which would
+  // put the old string straight back and leave every `node.type` check looking at a
+  // name that is no longer registered. Rewriting it here means a loaded graph is
+  // fully migrated in memory, and the next save writes the new names. Paste comes
+  // through the same path, so old clipboard payloads work too.
+  const proto = window.LGraphNode && window.LGraphNode.prototype;
+  if (proto && proto.configure) {
+    const origConfigure = proto.configure;
+    proto.configure = function (info) {
+      if (info && info.type && resolveType(info.type) !== info.type) {
+        info = Object.assign({}, info, { type: resolveType(info.type) });
+      }
+      return origConfigure.call(this, info);
+    };
+  }
+}
 
 // Snapshot litegraph's bundled node types NOW, at module load — before graphApp/play
 // call clearRegisteredTypes(). registerBuiltins() re-registers a curated few after
@@ -41,43 +124,102 @@ function registerBuiltins() {
   }
 }
 
-// copy shader for the Crop/Scale node (resamples its input into a sized texture)
-// uMode: 0 = stretch (fill, ignore aspect), 1 = crop (cover, fill + clip overflow), 2 = letterbox/pillarbox (contain, pad with bars)
+// Copy shader for the Crop/Scale node: resamples its input into a sized texture,
+// with a pan and a zoom on top so you can choose WHICH part of the image survives
+// the crop instead of always getting the centre.
+//   uMode 0 = stretch (fill, ignore aspect) · 1 = crop (cover) · 2 = letterbox (contain)
+//   uZoom  scales the source about the pan point; >1 moves in closer
+//   uOffX/uOffY  pan, in fractions of the output frame (0 = centred)
+//   uEdgeMode  what to show outside the image: 0 black · 1 clamp/smear · 2 wrap · 3 mirror
 const CP_VERT = `#version 300 es
 precision highp float; out vec2 vUv;
 void main(){ vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2)); vUv=p; gl_Position=vec4(p*2.0-1.0,0.0,1.0); }`;
 const CP_FRAG = `#version 300 es
 precision highp float; in vec2 vUv; out vec4 o;
-uniform sampler2D uColor; uniform vec2 uResolution; uniform float uInW, uInH, uMode;
+uniform sampler2D uColor; uniform vec2 uResolution;
+uniform float uInW, uInH, uMode, uZoom, uOffX, uOffY, uRotate, uEdgeMode, uFlipX, uFlipY;
+
+// Map a uv that may sit outside 0..1 into the image, per the edge rule. Returns
+// false when the sample should read as empty (black).
+bool edge(inout vec2 uv){
+  if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)))) return true;
+  if (uEdgeMode < 0.5) return false;
+  if (uEdgeMode < 1.5) { uv = clamp(uv, 0.0, 1.0); return true; }
+  if (uEdgeMode < 2.5) { uv = fract(uv); return true; }
+  uv = abs(fract(uv * 0.5 + 0.5) * 2.0 - 1.0); return true;
+}
+
 void main(){
-  if (uMode < 0.5) { o = texture(uColor, vUv); return; }
   float inW = max(uInW, 1.0), inH = max(uInH, 1.0);
-  if (uMode < 1.5) {
-    float scale = max(uResolution.x / inW, uResolution.y / inH);
-    vec2 frac = vec2(uResolution.x / (inW * scale), uResolution.y / (inH * scale));
-    o = texture(uColor, 0.5 + (vUv - 0.5) * frac);
-  } else {
-    float scale = min(uResolution.x / inW, uResolution.y / inH);
-    vec2 disp = vec2(inW, inH) * scale;
-    vec2 offset = (uResolution - disp) * 0.5;
-    vec2 local = vUv * uResolution - offset;
-    if (local.x < 0.0 || local.x > disp.x || local.y < 0.0 || local.y > disp.y) o = vec4(0.0, 0.0, 0.0, 1.0);
-    else o = texture(uColor, local / disp);
+  // 'frac' is the slice of the source that the output frame covers, in source uv.
+  vec2 frac = vec2(1.0);
+  if (uMode > 0.5) {
+    float scale = (uMode < 1.5) ? max(uResolution.x / inW, uResolution.y / inH)
+                                : min(uResolution.x / inW, uResolution.y / inH);
+    frac = uResolution / (vec2(inW, inH) * scale);
   }
+  vec2 p = vUv - 0.5;
+  float a = uRotate * 3.14159265359 / 180.0;
+  float ca = cos(a), sa = sin(a);
+  float aspect = max(uResolution.x, 1.0) / max(uResolution.y, 1.0);
+  p.x *= aspect;
+  p = mat2(ca, -sa, sa, ca) * p;
+  p.x /= aspect;
+  vec2 uv = 0.5 + (p / max(uZoom, 1e-4) - vec2(uOffX, uOffY)) * frac;
+  if (uFlipX > 0.5) uv.x = 1.0 - uv.x;
+  if (uFlipY > 0.5) uv.y = 1.0 - uv.y;
+  if (!edge(uv)) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  o = texture(uColor, uv);
 }`;
-const CP_CONTROLS = [{ uniform: 'uInW', value: 1024 }, { uniform: 'uInH', value: 1024 }, { uniform: 'uMode', value: 0 }];
+const CP_CONTROLS = [
+  { uniform: 'uInW', value: 1024 }, { uniform: 'uInH', value: 1024 }, { uniform: 'uMode', value: 0 },
+  { uniform: 'uZoom', value: 1 }, { uniform: 'uOffX', value: 0 }, { uniform: 'uOffY', value: 0 },
+  { uniform: 'uRotate', value: 0 }, { uniform: 'uEdgeMode', value: 0 },
+  { uniform: 'uFlipX', value: 0 }, { uniform: 'uFlipY', value: 0 },
+];
 const FIT_MODES = { stretch: 0, crop: 1, letterbox: 2 };
+const EDGE_MODES = { black: 0, clamp: 1, wrap: 2, mirror: 3 };
 
 const galleryValues = () => RT.gallery.map((i) => i.filename);
 const setWidget = (node, name, value) => { const w = (node.widgets || []).find((x) => x.name === name); if (w) w.value = value; };
 
 // ── in-node image drawing ──────────────────────────────────────────────────────
+// Node previews used to blit the output texture at its FULL size into the shared GL
+// canvas on every litegraph repaint — so a graph rendering at 2048² paid for a
+// 2048² blit per node per frame just to fill a 116px thumbnail, and paying it even
+// while paused is what made a paused 2K graph crawl. Two fixes: blit no larger than
+// the thumbnail actually needs, and keep the result in a per-node canvas that is
+// only refreshed when the output changes. A paused graph then costs nothing but the
+// drawImage of a cached bitmap.
+function previewCanvas(node, tex, w, h, maxDim) {
+  const version = (node._out && node._out.version) | 0;
+  const key = version + '|' + w + 'x' + h + '|' + maxDim + '|' + (tex ? 1 : 0);
+  let c = node._pvCanvas;
+  if (!c) { c = node._pvCanvas = document.createElement('canvas'); node._pvKey = null; }
+  if (node._pvKey === key) return c;
+  let r;
+  try { r = RT.engine.blitToCanvas(tex, w, h, maxDim); } catch (e) { return c; }
+  if (c.width !== r.width || c.height !== r.height) { c.width = r.width; c.height = r.height; }
+  const cx = c.getContext('2d');
+  cx.clearRect(0, 0, r.width, r.height);
+  try { cx.drawImage(RT.engine.canvas, 0, 0); } catch (e) { return c; }
+  node._pvKey = key;
+  return c;
+}
+
+// Quantised so dragging a Viewer's corner doesn't invalidate the cache on every
+// pixel of the drag (and doesn't reallocate the GL canvas 60 times a second).
+const quantize = (v, step) => Math.max(step, Math.ceil(v / step) * step);
+
 function drawImage(node, ctx, tex, a) {
   ctx.fillStyle = '#0a0c0f'; ctx.fillRect(a.x, a.y, a.w, a.h);
   if (!tex) return;
-  const out = node._out || {}, w = out.width || RT.RENDER_SIZE, h = out.height || RT.RENDER_SIZE; RT.engine.blitToCanvas(tex, w, h);
+  const out = node._out || {}, w = out.width || RT.RENDER_SIZE, h = out.height || RT.RENDER_SIZE;
+  const maxDim = Math.min(2048, quantize(Math.max(a.w, a.h) * 1.5, 128));
+  const c = previewCanvas(node, tex, w, h, maxDim);
+  if (!c.width) return;
   const s = Math.min(a.w / w, a.h / h), dw = w * s, dh = h * s;
-  try { ctx.drawImage(RT.engine.canvas, a.x + (a.w - dw) / 2, a.y + (a.h - dh) / 2, dw, dh); } catch (e) {}
+  try { ctx.drawImage(c, a.x + (a.w - dw) / 2, a.y + (a.h - dh) / 2, dw, dh); } catch (e) {}
 }
 function attachThumb(node) {
   node.onDrawForeground = function (ctx) {
@@ -116,13 +258,14 @@ function setImageOut(node, img) {
   node._status = null; RT.redraw();
 }
 
-function openFull(tex, size) {
-  const s = imageSize(size);
-  RT.engine.captureTexture(tex, s.width, s.height).then((blob) => {
-    const url = URL.createObjectURL(blob);
-    const ov = document.getElementById('viewerOverlay'), img = document.getElementById('viewerImg');
-    img.src = url; ov.hidden = false;
-    ov.onclick = () => { ov.hidden = true; URL.revokeObjectURL(url); };
+// Fullscreen a node's output. Polls the node every frame rather than snapshotting
+// it, so an animating graph keeps animating in fullscreen — see liveview.js.
+function openFull(node) {
+  openLiveView(() => {
+    const tex = node._tex || (node._out && node._out.tex);
+    if (!tex) return null;
+    const s = imageSize(node._out);
+    return { tex, width: s.width, height: s.height };
   });
 }
 
@@ -180,10 +323,13 @@ ImportNode.prototype.evaluate = function () { if (this._out && this._out.tex) th
 // the browser), this node keeps only the URL string — so a graph that uses it stays
 // tiny and travels in a share link. The catch is CORS: WebGL will not texture a
 // cross-origin image unless the host sends Access-Control-Allow-Origin. Hosts that
-// do: GitHub (raw/Pages), imgur, Cloudflare, most CDNs, S3 (one setting). Hosts that
-// don't (Wikimedia, many personal sites) fail with a clear message instead of a
-// silent black square. `loadImage` already requests the image with crossOrigin set,
-// so a blocked host rejects the load rather than tainting the canvas.
+// do: GitHub (raw/Pages), imgur, Wikimedia, Cloudflare, most CDNs, S3 (one setting).
+//
+// `loadImage` (engine.js) handles the awkward cases: it sends no referer, so
+// hotlink-protected hosts like imgur don't refuse a localhost page, and when a host
+// genuinely sends no CORS header it retries through the desktop backend's image
+// proxy. What's left — a host that is down, or a static deployment with no backend
+// to proxy through — reports a clear message instead of a silent black square.
 function UrlImageNode() {
   this.addOutput('out', IMG);
   this.properties = { url: '' };
@@ -216,44 +362,298 @@ UrlImageNode.prototype.onConfigure = function () {
 };
 UrlImageNode.prototype.evaluate = function () { if (this._out && this._out.tex) this.setOutputData(0, this._out); };
 
+// ── Webcam ──────────────────────────────────────────────────────────────────────
+// A live camera as an image source. The browser only hands over a stream after the
+// user grants permission, and only on a secure origin — https, or localhost, which
+// the desktop server is, so this works there without a certificate.
+//
+// The frame goes through the same crop/fit shader the Crop node uses, so a 16:9
+// camera can fill a square render without being squashed, and Mirror is on by
+// default because an un-mirrored camera feels wrong to anyone looking at themselves.
+//
+// Nothing about the stream is saved in the graph except the settings — no frames, no
+// device permission. A shared link opens with the camera stopped.
+function WebcamNode() {
+  this.addOutput('out', IMG);
+  this.properties = { playing: false, mirror: true, fit: 'crop', width: 0, height: 0, deviceLabel: '' };
+  const p = this.properties;
+  this._playBtn = this.addWidget('button', '▶ Start camera', null, () => this._toggle());
+  this.addWidget('toggle', 'mirror', p.mirror, (v) => { p.mirror = v; this._dirty = true; RT.requestSave(); });
+  this.addWidget('combo', 'fit', p.fit, (v) => { p.fit = v; this._dirty = true; RT.requestSave(); }, { values: ['stretch', 'crop', 'letterbox'] });
+  this._camWidget = this.addWidget('combo', 'camera', p.deviceLabel || 'default', (v) => {
+    p.deviceLabel = v === 'default' ? '' : v;
+    if (this._stream) { this._stop(); this._start(); }
+    RT.requestSave();
+  }, { values: ['default'] });
+  this._size = { width: RT.RENDER_SIZE, height: RT.RENDER_SIZE };
+  this._status = 'camera off'; this._statusColor = '#8a929c';
+  attachThumb(this); sizeWithThumb(this);
+}
+WebcamNode.title = 'Webcam';
+WebcamNode.prototype._toggle = function () { if (this._stream) this._stop(); else this._start(); };
+WebcamNode.prototype._start = async function () {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    this._status = 'no camera API (needs https or localhost)'; this._statusColor = '#ff6666'; RT.redraw(); return;
+  }
+  this._status = 'asking for camera…'; this._statusColor = '#ffcc66'; RT.redraw();
+  try {
+    const want = this.properties.deviceLabel;
+    let constraint = { video: { width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false };
+    if (want) {
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput');
+      const hit = devs.find((d) => d.label === want);
+      if (hit) constraint = { video: { deviceId: { exact: hit.deviceId } }, audio: false };
+    }
+    const stream = await navigator.mediaDevices.getUserMedia(constraint);
+    this._stream = stream;
+    const v = this._video || (this._video = document.createElement('video'));
+    v.autoplay = true; v.muted = true; v.playsInline = true;
+    v.srcObject = stream;
+    await v.play().catch(() => {});
+    this.properties.playing = true;
+    this._playBtn.name = '⏸ Pause camera';
+    this._status = '● live'; this._statusColor = '#37d0a0';
+    // Device labels are blank until permission is granted, so fill the list now.
+    try {
+      const devs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput' && d.label);
+      this._camWidget.options.values = ['default'].concat(devs.map((d) => d.label));
+    } catch (e) { /* not fatal */ }
+    RT.redraw();
+  } catch (e) {
+    this._status = 'camera blocked or busy'; this._statusColor = '#ff6666';
+    RT.toast('Camera: ' + (e.message || e.name), 'bad'); RT.redraw();
+  }
+};
+WebcamNode.prototype._stop = function () {
+  if (this._stream) { for (const t of this._stream.getTracks()) t.stop(); this._stream = null; }
+  if (this._video) this._video.srcObject = null;
+  this.properties.playing = false;
+  this._playBtn.name = '▶ Start camera';
+  this._status = 'camera off'; this._statusColor = '#8a929c'; RT.redraw();
+};
+WebcamNode.prototype.onRemoved = function () { this._stop(); };
+WebcamNode.prototype.onConfigure = function () {
+  setWidget(this, 'mirror', this.properties.mirror);
+  setWidget(this, 'fit', this.properties.fit || 'crop');
+  setWidget(this, 'camera', this.properties.deviceLabel || 'default');
+  // A saved graph never auto-opens the camera: a page that grabs your webcam the
+  // moment it loads is not a page anyone should have to trust.
+  this.properties.playing = false;
+};
+WebcamNode.prototype.evaluate = function () {
+  const v = this._video;
+  const live = this._stream && v && v.readyState >= 2 && v.videoWidth > 0;
+  // Frozen transport freezes the camera too, so pause really does mean "stop
+  // working" — otherwise a live feed would keep every downstream node re-rendering.
+  const advance = live && (RT.playing || RT.capturing);
+  if (live) {
+    this._size = nodeRenderSize(this, { width: v.videoWidth, height: v.videoHeight });
+    ensureOut(this);
+    if (advance || this._dirty) {
+      const tex = RT.engine.texFromVideo(v);
+      RT.engine.renderToTexture({
+        key: '__cropscale', vertSrc: CP_VERT, fragSrc: CP_FRAG, inputs: ['color'], inputTextures: { color: tex },
+        controls: CP_CONTROLS,
+        params: {
+          uInW: v.videoWidth, uInH: v.videoHeight, uMode: FIT_MODES[this.properties.fit] || 1,
+          uZoom: 1, uOffX: 0, uOffY: 0, uRotate: 0, uEdgeMode: 0,
+          uFlipX: this.properties.mirror ? 1 : 0, uFlipY: 0,
+        },
+      }, this._out.tex, this._size.width, this._size.height);
+      this._out.version++;
+      this._dirty = false;
+    }
+  }
+  if (this._out && this._out.tex) this.setOutputData(0, this._out);
+};
+WebcamNode.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this); };
+
+// ── Audio Reactive ──────────────────────────────────────────────────────────────
+// Microphone level → a number, for driving anything that takes a float pin. The
+// analyser gives a spectrum; `band` picks which slice of it to listen to (bass for
+// kick drums, treble for hats, all for overall loudness), and the level is then
+// mapped into your own min..max range so it lands wherever the target control wants
+// it — no separate Remap node needed.
+//
+// Smoothing is a one-pole filter: 0 is raw and jumpy, 0.9 is slow and syrupy. The
+// meter on the node face shows the mapped output so you can dial gain by eye.
+const BANDS = { all: [20, 16000], bass: [20, 200], low: [80, 500], mid: [500, 2000], high: [2000, 8000], treble: [6000, 16000] };
+function AudioReactiveNode() {
+  this.addOutput('value', 'number');
+  this.addOutput('raw 0-1', 'number');
+  this.properties = { min: 0, max: 1, band: 'all', gain: 1, smooth: 0.6, floor: 0.02, playing: false };
+  const p = this.properties;
+  this._playBtn = this.addWidget('button', '▶ Start mic', null, () => this._toggle());
+  this.addWidget('combo', 'band', p.band, (v) => { p.band = v; RT.requestSave(); }, { values: Object.keys(BANDS) });
+  this.addWidget('slider', 'gain', p.gain, (v) => { p.gain = v; RT.requestSave(); }, { min: 0.1, max: 20, step: 0.1 });
+  this.addWidget('slider', 'smooth', p.smooth, (v) => { p.smooth = v; RT.requestSave(); }, { min: 0, max: 0.98, step: 0.01 });
+  this.addWidget('slider', 'noise floor', p.floor, (v) => { p.floor = v; RT.requestSave(); }, { min: 0, max: 0.5, step: 0.005 });
+  this.addWidget('number', 'min', p.min, (v) => { p.min = v; RT.requestSave(); }, { step: 0.1 });
+  this.addWidget('number', 'max', p.max, (v) => { p.max = v; RT.requestSave(); }, { step: 0.1 });
+  this._level = 0; this._out01 = 0;
+  this._status = 'mic off'; this._statusColor = '#8a929c';
+  this.size = this.computeSize(); if (this.size[0] < 210) this.size[0] = 210;
+  this.size[1] += 22;   // room for the meter
+}
+AudioReactiveNode.title = 'Audio Reactive';
+AudioReactiveNode.prototype._toggle = function () { if (this._ctx) this._stop(); else this._start(); };
+AudioReactiveNode.prototype._start = async function () {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    this._status = 'no audio API (needs https or localhost)'; this._statusColor = '#ff6666'; RT.redraw(); return;
+  }
+  this._status = 'asking for mic…'; this._statusColor = '#ffcc66'; RT.redraw();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+    });
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    const src = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 2048;
+    analyser.smoothingTimeConstant = 0.4;
+    src.connect(analyser);            // deliberately NOT connected to the output: no feedback howl
+    this._stream = stream; this._ctx = ctx; this._analyser = analyser;
+    this._bins = new Uint8Array(analyser.frequencyBinCount);
+    this.properties.playing = true;
+    this._playBtn.name = '⏸ Pause mic';
+    this._status = '● listening'; this._statusColor = '#37d0a0'; RT.redraw();
+  } catch (e) {
+    this._status = 'mic blocked or busy'; this._statusColor = '#ff6666';
+    RT.toast('Microphone: ' + (e.message || e.name), 'bad'); RT.redraw();
+  }
+};
+AudioReactiveNode.prototype._stop = function () {
+  if (this._stream) { for (const t of this._stream.getTracks()) t.stop(); this._stream = null; }
+  if (this._ctx) { this._ctx.close().catch(() => {}); this._ctx = null; }
+  this._analyser = null;
+  this.properties.playing = false;
+  this._playBtn.name = '▶ Start mic';
+  this._status = 'mic off'; this._statusColor = '#8a929c'; RT.redraw();
+};
+AudioReactiveNode.prototype.onRemoved = function () { this._stop(); };
+AudioReactiveNode.prototype.onConfigure = function () {
+  const p = this.properties;
+  if (p.floor === undefined) p.floor = 0.02;
+  for (const k of ['band', 'gain', 'smooth', 'min', 'max']) setWidget(this, k, p[k]);
+  setWidget(this, 'noise floor', p.floor);
+  p.playing = false;    // same reasoning as the camera: never auto-open the mic
+};
+AudioReactiveNode.prototype.evaluate = function () {
+  const p = this.properties;
+  if (this._analyser && (RT.playing || RT.capturing)) {
+    this._analyser.getByteFrequencyData(this._bins);
+    const rate = this._ctx.sampleRate, n = this._bins.length;
+    const [lo, hi] = BANDS[p.band] || BANDS.all;
+    const i0 = Math.max(0, Math.floor(lo / (rate / 2) * n));
+    const i1 = Math.min(n - 1, Math.ceil(hi / (rate / 2) * n));
+    let sum = 0;
+    for (let i = i0; i <= i1; i++) sum += this._bins[i];
+    const mean = sum / Math.max(1, i1 - i0 + 1) / 255;
+    const floor = p.floor === undefined ? 0.02 : p.floor;
+    const raw = Math.max(0, Math.min(1, (mean - floor) / Math.max(1e-4, 1 - floor) * (p.gain || 1)));
+    const k = Math.max(0, Math.min(0.98, p.smooth || 0));
+    this._out01 = this._out01 * k + raw * (1 - k);
+    RT.redraw();     // keep the meter live
+  }
+  this._level = p.min + this._out01 * (p.max - p.min);
+  this.setOutputData(0, this._level);
+  this.setOutputData(1, this._out01);
+};
+AudioReactiveNode.prototype.onDrawForeground = function (ctx) {
+  if (this.flags.collapsed) return;
+  const y = this.size[1] - 18, w = this.size[0] - 20;
+  ctx.fillStyle = '#0a0c0f'; ctx.fillRect(10, y, w, 10);
+  ctx.fillStyle = this._analyser ? '#37d0a0' : '#3a4048';
+  ctx.fillRect(10, y, w * Math.max(0, Math.min(1, this._out01)), 10);
+  ctx.fillStyle = '#8a929c'; ctx.font = '10px sans-serif';
+  ctx.fillText((this._status || '') + '   ' + this._level.toFixed(3), 10, y - 4);
+};
+
 // ── Crop / Scale (set output resolution) ───────────────────────────────────────
 const ASPECT_SIZES = { '1:1': [1024, 1024], '16:9': [1920, 1080], '9:16': [1080, 1920], '4:3': [1024, 768], '3:4': [768, 1024] };
+const CROP_DEFAULTS = { aspect: 'custom', width: 1024, height: 1024, fit: 'stretch', zoom: 1, offX: 0, offY: 0, rotate: 0, edge: 'black' };
 function CropScaleNode() {
   this.addInput('image', IMG); this.addOutput('out', IMG);
-  this.properties = { aspect: 'custom', width: 1024, height: 1024, fit: 'stretch' };
-  this.addWidget('combo', 'aspect', this.properties.aspect, (v) => {
-    this.properties.aspect = v;
+  this.properties = Object.assign({}, CROP_DEFAULTS);
+  const p = this.properties;
+  const mark = () => { this._dirty = true; RT.requestSave(); };
+  this.addWidget('combo', 'aspect', p.aspect, (v) => {
+    p.aspect = v;
     const preset = ASPECT_SIZES[v];
-    if (preset) [this.properties.width, this.properties.height] = preset;
-    setWidget(this, 'width', this.properties.width); setWidget(this, 'height', this.properties.height);
+    if (preset) [p.width, p.height] = preset;
+    setWidget(this, 'width', p.width); setWidget(this, 'height', p.height);
     this._realloc(); RT.requestSave();
   }, { values: ['1:1', '16:9', '9:16', '4:3', '3:4', 'custom'] });
-  this.addWidget('number', 'width', this.properties.width, (v) => { this.properties.width = Math.max(64, Math.round(v)); this.properties.aspect = 'custom'; setWidget(this, 'aspect', 'custom'); this._realloc(); RT.requestSave(); }, { min: 64, max: 8192, step: 1 });
-  this.addWidget('number', 'height', this.properties.height, (v) => { this.properties.height = Math.max(64, Math.round(v)); this.properties.aspect = 'custom'; setWidget(this, 'aspect', 'custom'); this._realloc(); RT.requestSave(); }, { min: 64, max: 8192, step: 1 });
-  this.addWidget('combo', 'fit', this.properties.fit, (v) => { this.properties.fit = v; this._dirty = true; RT.requestSave(); }, { values: ['stretch', 'crop', 'letterbox'] });
-  this._size = { width: this.properties.width, height: this.properties.height }; this._dirty = true;
+  this.addWidget('number', 'width', p.width, (v) => { p.width = Math.max(64, Math.round(v)); p.aspect = 'custom'; setWidget(this, 'aspect', 'custom'); this._realloc(); RT.requestSave(); }, { min: 64, max: 8192, step: 1 });
+  this.addWidget('number', 'height', p.height, (v) => { p.height = Math.max(64, Math.round(v)); p.aspect = 'custom'; setWidget(this, 'aspect', 'custom'); this._realloc(); RT.requestSave(); }, { min: 64, max: 8192, step: 1 });
+  this.addWidget('combo', 'fit', p.fit, (v) => { p.fit = v; mark(); }, { values: ['stretch', 'crop', 'letterbox'] });
+  // Pan / zoom / rotate: which part of the source ends up in the frame. Sliders so
+  // they can be exposed in an authored UI (and pinned to a math node) like any
+  // other continuous control.
+  this.addWidget('slider', 'zoom', p.zoom, (v) => { p.zoom = v; mark(); }, { min: 0.1, max: 8, step: 0.01 });
+  this.addWidget('slider', 'offset x', p.offX, (v) => { p.offX = v; mark(); }, { min: -1, max: 1, step: 0.002 });
+  this.addWidget('slider', 'offset y', p.offY, (v) => { p.offY = v; mark(); }, { min: -1, max: 1, step: 0.002 });
+  this.addWidget('slider', 'rotate', p.rotate, (v) => { p.rotate = v; mark(); }, { min: -180, max: 180, step: 0.5 });
+  this.addWidget('combo', 'edges', p.edge, (v) => { p.edge = v; mark(); }, { values: ['black', 'clamp', 'wrap', 'mirror'] });
+  this.addWidget('button', 'reset framing', null, () => {
+    p.zoom = 1; p.offX = 0; p.offY = 0; p.rotate = 0;
+    setWidget(this, 'zoom', 1); setWidget(this, 'offset x', 0);
+    setWidget(this, 'offset y', 0); setWidget(this, 'rotate', 0);
+    mark(); RT.redraw();
+  });
+  this._size = { width: p.width, height: p.height }; this._dirty = true;
   attachThumb(this); sizeWithThumb(this);
 }
 CropScaleNode.title = 'Crop / Scale';
 CropScaleNode.prototype._realloc = function () { if (this._out && this._out.tex) RT.engine.gl.deleteTexture(this._out.tex); this._out = null; this._size = { width: +this.properties.width || 1024, height: +this.properties.height || 1024 }; this._dirty = true; };
 CropScaleNode.prototype.onConfigure = function () {
-  this.properties.aspect = this.properties.aspect || 'custom';
-  this.properties.fit = this.properties.fit || 'stretch';
-  this._size = { width: +this.properties.width || 1024, height: +this.properties.height || 1024 }; this._dirty = true;
-  setWidget(this, 'aspect', this.properties.aspect); setWidget(this, 'width', this._size.width); setWidget(this, 'height', this._size.height);
-  setWidget(this, 'fit', this.properties.fit);
+  // Older saves have no pan/zoom keys at all; fill them in rather than rendering
+  // with undefined uniforms (which would come out as a black frame).
+  for (const k in CROP_DEFAULTS) if (this.properties[k] === undefined) this.properties[k] = CROP_DEFAULTS[k];
+  const p = this.properties;
+  this._size = { width: +p.width || 1024, height: +p.height || 1024 }; this._dirty = true;
+  setWidget(this, 'aspect', p.aspect); setWidget(this, 'width', this._size.width); setWidget(this, 'height', this._size.height);
+  setWidget(this, 'fit', p.fit); setWidget(this, 'zoom', p.zoom); setWidget(this, 'offset x', p.offX);
+  setWidget(this, 'offset y', p.offY); setWidget(this, 'rotate', p.rotate); setWidget(this, 'edges', p.edge);
 };
+// Drag inside the thumbnail to pan, wheel to zoom — much faster than nudging two
+// sliders when you're framing by eye.
+CropScaleNode.prototype.onMouseDown = function (e, pos) {
+  if (this.flags.collapsed) return;
+  const thumbY = this.size[1] - THUMB_H;
+  if (pos[1] < thumbY || pos[1] > this.size[1]) return;
+  this._drag = { x: pos[0], y: pos[1], offX: this.properties.offX, offY: this.properties.offY };
+  return true;
+};
+CropScaleNode.prototype.onMouseMove = function (e, pos) {
+  if (!this._drag) return;
+  const p = this.properties;
+  p.offX = this._drag.offX + (pos[0] - this._drag.x) / this.size[0];
+  p.offY = this._drag.offY - (pos[1] - this._drag.y) / THUMB_H;
+  setWidget(this, 'offset x', +p.offX.toFixed(3)); setWidget(this, 'offset y', +p.offY.toFixed(3));
+  markDirty(this);
+  return true;
+};
+CropScaleNode.prototype.onMouseUp = function () { if (!this._drag) return; this._drag = null; RT.requestSave(); return true; };
 CropScaleNode.prototype.evaluate = function () {
   const h = this.getInputData(0);
+  const p = this.properties;
   const v = h && h.tex ? (h.version | 0) : -1;
-  const fit = this.properties.fit || 'stretch';
-  if (this._dirty || v !== this._inV || fit !== this._inFit) {
-    this._inV = v; this._inFit = fit;
+  const pkey = [p.fit, p.zoom, p.offX, p.offY, p.rotate, p.edge].join('|');
+  if (this._dirty || v !== this._inV || pkey !== this._pkey) {
+    this._inV = v; this._pkey = pkey;
     ensureOut(this);
     if (h && h.tex) {
       RT.engine.renderToTexture({
         key: '__cropscale', vertSrc: CP_VERT, fragSrc: CP_FRAG, inputs: ['color'], inputTextures: { color: h.tex },
-        controls: CP_CONTROLS, params: { uInW: h.width || this._size.width, uInH: h.height || this._size.height, uMode: FIT_MODES[fit] || 0 },
+        controls: CP_CONTROLS,
+        params: {
+          uInW: h.width || this._size.width, uInH: h.height || this._size.height,
+          uMode: FIT_MODES[p.fit] || 0, uZoom: +p.zoom || 1,
+          uOffX: +p.offX || 0, uOffY: +p.offY || 0, uRotate: +p.rotate || 0,
+          uEdgeMode: EDGE_MODES[p.edge] || 0,
+        },
       }, this._out.tex, this._size.width, this._size.height);
       this._out.version++;
     }
@@ -261,6 +661,7 @@ CropScaleNode.prototype.evaluate = function () {
   }
   this.setOutputData(0, this._out);
 };
+CropScaleNode.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this); };
 
 // ── Shader (one type per scanned shader) ───────────────────────────────────────
 function makeShaderNode(def) {
@@ -278,6 +679,10 @@ function makeShaderNode(def) {
     if (def.feedback) {
       this.addWidget('combo', 'sim grid', this.properties.simSize, (v) => { this.properties.simSize = +v; this._seed = (this._seed || 0) + 1; RT.requestSave(); }, { values: [128, 256, 512] });
       this.addWidget('button', '↺ reset sim', null, () => { RT.engine.resetSim('n' + this.id); this._seed = (this._seed || 0) + 1; });
+    } else if (def.history) {
+      // history shaders run at full output resolution, so there is no sim grid to
+      // choose — just a way to wipe the accumulated frame and start over.
+      this.addWidget('button', '↺ clear feedback', null, () => { RT.engine.resetHistory('n' + this.id); this._dirty = true; });
     } else if (def.animated) {
       // time-driven (non-feedback) shaders: an explicit animate toggle drives uTime
       this.addWidget('toggle', 'animate', !!this.properties.animate, (v) => { this.properties.animate = v; this._dirty = true; RT.requestSave(); });
@@ -326,8 +731,11 @@ function makeShaderNode(def) {
       }
     });
     const feedback = !!def.feedback;
+    const history = !!def.history;
+    // A stateful shader (feedback sim or history buffer) is running a simulation, so
+    // it steps whenever the transport plays regardless of the `animate` toggle.
     // animate only while playing (RT.advance); edits still re-render via _dirty/pkey
-    const animate = RT.advance && (feedback || (def.animated && this.properties.animate));
+    const animate = RT.advance && (feedback || history || (def.animated && this.properties.animate));
     const firstInput = inputs.map((_name, i) => this.getInputData(i)).find((h) => h && h.tex);
     this._size = nodeRenderSize(this, firstInput);
     const vkey = vers.join(',');
@@ -338,16 +746,24 @@ function makeShaderNode(def) {
       RT.engine.renderToTexture({
         key: def.key, vertSrc: def.vertSrc, fragSrc: def.fragSrc,
         controls: def.controls || [], params,
-        inputs, inputTextures: inTex,
-        feedback, simSize, simKey: 'n' + this.id, advance: feedback && RT.advance, time: RT.time,
-        resetToken: 'n' + this.id + '|' + simSize + '|' + vkey + '|' + (this._seed || 0),
+        inputs, inputTextures: inTex, inputDefaults: def.inputDefaults,
+        feedback, history, simSize, simKey: 'n' + this.id, histKey: 'n' + this.id,
+        advance: (feedback || history) && RT.advance, time: RT.time, frame: RT.frame,
+        // A simulation's reset token deliberately does NOT include the input image
+        // versions. It used to, which meant swapping or re-rendering an upstream
+        // image tore down a Kuramoto field that had been settling for a minute and
+        // reseeded it from scratch — the exact opposite of what you want when the
+        // images are supposed to be steering a running simulation. Only an explicit
+        // reset, a sim-grid change, or a resolution change starts it over now.
+        resetToken: 'n' + this.id + '|' + simSize + '|' + (this._seed || 0)
+          + (history ? '|' + this._size.width + 'x' + this._size.height : ''),
       }, this._out.tex, this._size.width, this._size.height);
       this._out.version++;
       this._dirty = false; this._vkey = vkey; this._pkey = pkey;
     }
     this.setOutputData(0, this._out);
   };
-  Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this._out.tex, this._out); };
+  Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this); };
   if ((def.controls || []).some((c) => c.uniform === 'uPickX')) {
     Node.prototype.onMouseDown = function (_e, pos) {
       if (this.flags.collapsed) return;
@@ -429,7 +845,10 @@ function makeShaderNode(def) {
     };
   }
 
-  LG.registerNodeType('forge/shader/' + def.key, Node);
+  // Category comes from the shader's own manifest, so a new shader files itself.
+  const type = (def.category || 'effect') + '/' + def.key;
+  LEGACY['forge/shader/' + def.key] = type;
+  LG.registerNodeType(type, Node);
 }
 
 // ── Depth (auto-bakes via ComfyUI on input change) ─────────────────────────────
@@ -523,25 +942,72 @@ function makeAiNode(wf) {
     } catch (e) { this._status = 'generate failed'; this._statusColor = '#ff6666'; RT.toast('Generate failed: ' + e.message, 'bad'); }
   };
   Node.prototype.evaluate = function () { if (this._out && this._out.tex) this.setOutputData(0, this._out); };
-  Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this._out.tex, this._out); };
-  LG.registerNodeType('forge/ai/' + wf.key, Node);
+  Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this); };
+  LEGACY['forge/ai/' + wf.key] = 'ai/' + wf.key;
+  LG.registerNodeType('ai/' + wf.key, Node);
 }
 
 // ── Viewer ────────────────────────────────────────────────────────────────────
+// Drag the bottom-right corner to resize (litegraph's own resize handle — the node
+// just has to not fight it, which is what onResize is for). Fullscreen shows a LIVE
+// canvas, not a snapshot, so an animating graph keeps animating; see liveview.js.
 function ViewerNode() {
   this.addInput('image', IMG);
   this.properties = {};
   this.size = [300, 300];
-  this.addWidget('button', '⤢ fullscreen', null, () => { if (this._tex) openFull(this._tex, this._out); });
+  this.resizable = true;
+  this.addWidget('button', '⤢ fullscreen', null, () => openFull(this));
   this.onDrawForeground = function (ctx) {
     if (this.flags.collapsed) return;
     drawImage(this, ctx, this._tex, { x: 0, y: 30, w: this.size[0], h: this.size[1] - 30 });
   };
 }
 ViewerNode.title = 'Viewer';
-ViewerNode.prototype.onResize = function () { if (this.size[1] < 120) this.size[1] = 120; };
+// Keep it big enough to still show a picture and hit the resize corner.
+ViewerNode.prototype.onResize = function (size) {
+  const s = size || this.size;
+  if (s[0] < 140) s[0] = 140;
+  if (s[1] < 120) s[1] = 120;
+};
 ViewerNode.prototype.evaluate = function () { const h = this.getInputData(0); this._out = h || null; this._tex = h && h.tex ? h.tex : null; };
-ViewerNode.prototype.onDblClick = function () { if (this._tex) openFull(this._tex, this._out); };
+ViewerNode.prototype.onDblClick = function () { openFull(this); };
+// Handy sizes, since dragging to an exact aspect by hand is fiddly.
+ViewerNode.prototype.getExtraMenuOptions = function () {
+  const node = this;
+  return [{
+    content: 'Viewer size',
+    has_submenu: true,
+    callback: function (_v, _opts, e, menu) {
+      const opts = { 'Small (240)': 240, 'Medium (360)': 360, 'Large (520)': 520, 'Huge (760)': 760 };
+      new LG.ContextMenu(Object.keys(opts).concat(['Match image aspect']), {
+        event: e, parentMenu: menu, callback: function (val) {
+          if (val === 'Match image aspect') {
+            const s = imageSize(node._out);
+            node.size[1] = Math.round(node.size[0] * (s.height / s.width)) + 30;
+          } else {
+            const w = opts[val];
+            const s = imageSize(node._out);
+            node.size[0] = w; node.size[1] = Math.round(w * (s.height / s.width)) + 30;
+          }
+          node.onResize(node.size);
+          RT.requestSave(); RT.redraw();
+        },
+      });
+    },
+  }, {
+    content: '⤢ Fullscreen (live)',
+    callback: function () { openFull(node); },
+  }, {
+    content: '⬇ Download PNG',
+    callback: function () {
+      if (!node._tex) return RT.toast('Connect an image', 'bad');
+      const s = imageSize(node._out);
+      downloadTexture(node._tex, s.width, s.height, 'forge_' + (RT.project || 'view') + '.png')
+        .then(() => RT.toast('Downloaded', 'good'))
+        .catch((err) => RT.toast('Download failed: ' + err.message, 'bad'));
+    },
+  }].concat(getOutputNodeMenuOptions.call(node));
+};
 
 // ── Viewer Window (live output in a separate, fullscreen-able window) ───────────
 // Opens a same-origin popup with its own 2D canvas. Each frame we blit this node's
@@ -595,17 +1061,26 @@ ViewerWindowNode.prototype._push = function () {
   const cvs = this._canvas, ctx = this._ctx;
   const dw = w.innerWidth | 0, dh = w.innerHeight | 0;
   if (!dw || !dh) return;
+  // Nothing new to show and the window hasn't been resized? Then don't spend a
+  // full-resolution blit on redrawing the identical frame — that cost is what made
+  // a paused high-res graph feel like it was still working.
+  const stamp = ((this._out && this._out.version) | 0) + '|' + dw + 'x' + dh + '|' + (this._tex ? 1 : 0);
+  if (stamp === this._pushStamp) return;
+  this._pushStamp = stamp;
   if (cvs.width !== dw || cvs.height !== dh) { cvs.width = dw; cvs.height = dh; }
   ctx.fillStyle = '#000'; ctx.fillRect(0, 0, dw, dh);
   if (!this._tex) return;
   const t = imageSize(this._texSize);
-  RT.engine.blitToCanvas(this._tex, t.width, t.height);
   const s = Math.min(dw / t.width, dh / t.height);   // letterbox, preserving the texture's aspect
   const iw = t.width * s, ih = t.height * s;
-  try { ctx.drawImage(RT.engine.canvas, (dw - iw) / 2, (dh - ih) / 2, iw, ih); } catch (e) {}
+  try {
+    const r = RT.engine.blitToCanvas(this._tex, t.width, t.height, Math.max(dw, dh));
+    ctx.drawImage(RT.engine.canvas, 0, 0, r.width, r.height, (dw - iw) / 2, (dh - ih) / 2, iw, ih);
+  } catch (e) {}
 };
 ViewerWindowNode.prototype.evaluate = function () {
   const h = this.getInputData(0);
+  this._out = h || null;
   this._tex = h && h.tex ? h.tex : null;
   this._texSize = h && h.tex ? imageSize(h) : this._texSize;
   if (this._win) this._push();
@@ -806,7 +1281,7 @@ function insertPassThrough(node) {
   const graph = node.graph;
   if (!graph) return;
 
-  const ptNode = LG.createNode('forge/pass_through');
+  const ptNode = LG.createNode(T.PASS_THROUGH);
   if (!ptNode) return;
 
   // Position it slightly to the left of the target node
@@ -850,7 +1325,7 @@ function getOutputNodeMenuOptions() {
   }];
 }
 
-ViewerNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
+// (ViewerNode builds its own menu, which ends with these same options.)
 ViewerWindowNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
 SaveNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
 SequenceNode.prototype.getExtraMenuOptions = getOutputNodeMenuOptions;
@@ -917,19 +1392,22 @@ ToggleNode.prototype.evaluate = function () { this.setOutputData(0, this.propert
 ToggleNode.prototype.onConfigure = function () { setWidget(this, 'value', this.properties.value); };
 
 export function registerNodes() {
-  LG.registerNodeType('forge/source', SourceNode);
-  LG.registerNodeType('forge/import', ImportNode);
-  LG.registerNodeType('forge/url_image', UrlImageNode);
-  LG.registerNodeType('forge/crop_scale', CropScaleNode);
-  LG.registerNodeType('forge/control/slider', SliderNode);
-  LG.registerNodeType('forge/control/number', NumberNode);
-  LG.registerNodeType('forge/control/toggle', ToggleNode);
-  LG.registerNodeType('forge/depth', DepthNode);
-  LG.registerNodeType('forge/viewer', ViewerNode);
-  LG.registerNodeType('forge/viewer_window', ViewerWindowNode);
-  LG.registerNodeType('forge/save', SaveNode);
-  LG.registerNodeType('forge/sequence', SequenceNode);
-  LG.registerNodeType('forge/pass_through', PassThroughNode);
+  installTypeAliases();
+  LG.registerNodeType(T.SOURCE, SourceNode);
+  LG.registerNodeType(T.IMPORT, ImportNode);
+  LG.registerNodeType(T.URL_IMAGE, UrlImageNode);
+  LG.registerNodeType(T.WEBCAM, WebcamNode);
+  LG.registerNodeType(T.AUDIO, AudioReactiveNode);
+  LG.registerNodeType(T.CROP, CropScaleNode);
+  LG.registerNodeType(T.SLIDER, SliderNode);
+  LG.registerNodeType(T.NUMBER, NumberNode);
+  LG.registerNodeType(T.TOGGLE, ToggleNode);
+  LG.registerNodeType(T.DEPTH, DepthNode);
+  LG.registerNodeType(T.VIEWER, ViewerNode);
+  LG.registerNodeType(T.VIEWER_WINDOW, ViewerWindowNode);
+  LG.registerNodeType(T.SAVE, SaveNode);
+  LG.registerNodeType(T.SEQUENCE, SequenceNode);
+  LG.registerNodeType(T.PASS_THROUGH, PassThroughNode);
   for (const def of RT.shaderDefs) makeShaderNode(def);
   for (const wf of RT.workflows) makeAiNode(wf);
   for (const m of RT.mathDefs) makeMathNode(m);

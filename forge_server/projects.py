@@ -155,6 +155,54 @@ def source_path(settings: Dict[str, Any], project: str, filename: str) -> Path:
     return p
 
 
+def rename_image(settings: Dict[str, Any], project: str, filename: str,
+                 new_name: str) -> Dict[str, Any]:
+    """Rename a gallery image, keeping its sidecar and dropping stale thumbnails.
+
+    Extension: whatever the caller typed, else the original's. Renaming a .png to
+    ".jpg" would produce a file that lies about its own contents, so the extension
+    is only allowed to change between known image suffixes, and the bytes are never
+    re-encoded — if you type a bare name you keep the original suffix.
+    """
+    src = source_path(settings, project, filename)
+    if not src.exists():
+        raise FileNotFoundError(filename)
+
+    # Same sanitising rule the importer uses, so a rename can't create a name the
+    # gallery couldn't have produced itself (or escape the folder).
+    raw = Path(str(new_name).strip()).name
+    stem, ext = Path(raw).stem, Path(raw).suffix.lower()
+    stem = "".join(c for c in stem if c.isalnum() or c in " ._-").strip()
+    if not stem:
+        raise ValueError("that name has no usable characters")
+    if ext not in _IMG_EXTS:
+        ext = src.suffix
+    dst = src.with_name(f"{stem}{ext}")
+    if dst == src:
+        return entry(settings, project, src)
+    if dst.exists():
+        raise ValueError(f"{dst.name} already exists")
+
+    src.rename(dst)
+    old_meta = _meta_path(src)
+    if old_meta.exists():
+        try:
+            meta = json.loads(old_meta.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            meta = {}
+        meta["file"] = dst.name
+        meta.setdefault("renamed_from", src.name)
+        _meta_path(dst).write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        old_meta.unlink(missing_ok=True)
+
+    # Thumbnails are cached by stem; the old ones are now orphaned.
+    cache = config.project_dir(settings, project) / ".thumbs"
+    if cache.exists():
+        for t in cache.glob(f"{src.stem}_*.jpg"):
+            t.unlink(missing_ok=True)
+    return entry(settings, project, dst)
+
+
 # ── thumbnails (cached) ──────────────────────────────────────────────────────
 def thumb(settings: Dict[str, Any], project: str, filename: str, size: int = 256
           ) -> Optional[Path]:

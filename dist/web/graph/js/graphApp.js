@@ -12,6 +12,7 @@ import {
   carryGraphInto, confirmProjectSwitch, doc, initFileMenu, markDirty, save, updateTitle,
 } from './filemenu.js';
 import { askText } from './ui.js';
+import { openHelp } from './help.js';
 
 const LG = window.LiteGraph;
 const $ = (id) => document.getElementById(id);
@@ -50,9 +51,10 @@ async function loadShaderDefs() {
 // flatten so nodes read def.inputs/controls/feedback directly but keep .key/src
 function normalizeDefs(raw) {
   return raw.map((d) => ({
-    key: d.key, name: d.def.name, vertSrc: d.vertSrc, fragSrc: d.fragSrc,
-    inputs: d.def.inputs, inputLabels: d.def.inputLabels, controls: d.def.controls,
-    feedback: d.def.feedback, animated: d.def.animated, simSize: d.def.simSize,
+    key: d.key, name: d.def.name, category: d.def.category, vertSrc: d.vertSrc, fragSrc: d.fragSrc,
+    inputs: d.def.inputs, inputLabels: d.def.inputLabels, inputDefaults: d.def.inputDefaults,
+    controls: d.def.controls, feedback: d.def.feedback, history: d.def.history,
+    animated: d.def.animated, simSize: d.def.simSize,
   }));
 }
 
@@ -169,6 +171,10 @@ function resizeCanvas(canvas) {
   RT.refreshGallery = refreshGallery;
   RT.evalOnce = evalOnce;
   RT.checkComfy = pollComfy;     // re-check on demand (boot + AI-node creation)
+  // A handle on the live runtime from the browser console: forge.graph, forge.engine,
+  // forge.playing, forge.time. Handy when a shader misbehaves and you want to poke at
+  // it without adding print statements.
+  window.forge = RT;
 
   // data
   await fillProjects();
@@ -249,6 +255,8 @@ function resizeCanvas(canvas) {
   rsSel.value = String(RT.RENDER_SIZE);
   rsSel.onchange = () => { RT.RENDER_SIZE = +rsSel.value || 512; localStorage.setItem('forge.graph.renderSize', String(RT.RENDER_SIZE)); toast('Default render size: ' + RT.RENDER_SIZE); };
 
+  $('helpBtn').onclick = () => openHelp();
+
   // comfy is checked once on boot (and again when an AI node is created); no polling
   pollComfy();
 
@@ -256,8 +264,17 @@ function resizeCanvas(canvas) {
   // probes the backend to decide which items this build can actually offer.
   await initFileMenu();
 
-  // the single render/eval loop — time accumulates only while playing, so pause
+  // The single render/eval loop — time accumulates only while playing, so pause
   // freezes time-driven shaders and feedback sims (RT.advance gates the nodes).
+  //
+  // Pause has to be genuinely idle, not just visually still. It used to force a full
+  // litegraph repaint every frame whether or not anything had changed, and each
+  // repaint re-blitted every node's output texture at full size — so pausing a graph
+  // rendering at 2048² left it doing almost as much work as playing. Now a paused
+  // frame only repaints when something marked the canvas dirty (a click, a slider, a
+  // node finishing a load), and node previews come from a cached bitmap. Anything
+  // that needs continuous painting while paused — the fullscreen viewer — registers
+  // a hook instead.
   let lastT = performance.now();
   function frame() {
     const now = performance.now();
@@ -267,7 +284,8 @@ function resizeCanvas(canvas) {
       RT.advance = RT.playing;
       evalOnce();
     }
-    try { RT.graphcanvas.draw(true, true); } catch (e) {}
+    RT.runHooks();
+    try { RT.graphcanvas.draw(RT.playing || RT.capturing, false); } catch (e) {}
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);

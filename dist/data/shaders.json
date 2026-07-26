@@ -1,6 +1,12 @@
 {
   "shaders": [
     {
+      "key": "antialias",
+      "js": "/shaders/antialias.js",
+      "frag": "/shaders/antialias.frag",
+      "vert": null
+    },
+    {
       "key": "blend",
       "js": "/shaders/blend.js",
       "frag": "/shaders/blend.frag",
@@ -109,6 +115,12 @@
       "vert": null
     },
     {
+      "key": "randomWalk",
+      "js": "/shaders/randomWalk.js",
+      "frag": "/shaders/randomWalk.frag",
+      "vert": null
+    },
+    {
       "key": "rayMarching",
       "js": "/shaders/rayMarching.js",
       "frag": "/shaders/rayMarching.frag",
@@ -136,6 +148,12 @@
       "key": "smoothstep",
       "js": "/shaders/smoothstep.js",
       "frag": "/shaders/smoothstep.frag",
+      "vert": null
+    },
+    {
+      "key": "videoFeedback",
+      "js": "/shaders/videoFeedback.js",
+      "frag": "/shaders/videoFeedback.frag",
       "vert": null
     },
     {
