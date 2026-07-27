@@ -19,6 +19,12 @@
       "vert": null
     },
     {
+      "key": "cellularAutomata",
+      "js": "/shaders/cellularAutomata.js",
+      "frag": "/shaders/cellularAutomata.frag",
+      "vert": null
+    },
+    {
       "key": "colorGrade",
       "js": "/shaders/colorGrade.js",
       "frag": "/shaders/colorGrade.frag",
@@ -67,6 +73,12 @@
       "vert": null
     },
     {
+      "key": "framebuffer",
+      "js": "/shaders/framebuffer.js",
+      "frag": "/shaders/framebuffer.frag",
+      "vert": null
+    },
+    {
       "key": "floodFill",
       "js": "/shaders/floodFill.js",
       "frag": "/shaders/floodFill.frag",
@@ -88,6 +100,12 @@
       "key": "histogramScan",
       "js": "/shaders/histogramScan.js",
       "frag": "/shaders/histogramScan.frag",
+      "vert": null
+    },
+    {
+      "key": "invert",
+      "js": "/shaders/invert.js",
+      "frag": "/shaders/invert.frag",
       "vert": null
     },
     {
