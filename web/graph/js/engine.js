@@ -56,6 +56,11 @@ export class ShaderEngine {
     this.copyFbo = gl.createFramebuffer();   // for texture→texture copies (history)
     this.sims = new Map();
     this.hist = new Map();                   // full-resolution history buffers
+    // drawBuffers argument per attachment count, so a multi-target sim pass doesn't
+    // rebuild the array 40 times a frame. Index = number of targets.
+    this.drawBufs = [[gl.NONE]];
+    for (let n = 1; n <= 4; n++)
+      this.drawBufs.push(Array.from({ length: n }, (_, i) => gl.COLOR_ATTACHMENT0 + i));
   }
 
   ensureProgram(key, vertSrc, fragSrc) {
@@ -225,6 +230,10 @@ export class ShaderEngine {
     gl.uniform2f(this._loc(info, 'uResolution'), w, h);
     gl.uniform1f(this._loc(info, 'uTime'), spec.time || 0);
     gl.uniform1f(this._loc(info, 'uFrame'), spec.frame || 0);
+    // Which output slot is being rendered, for a shader whose manifest declares more
+    // than one (see `outputs` in nodes.js): the node runs the same program once per
+    // slot and the shader branches on this. 0 for every single-output shader.
+    gl.uniform1f(this._loc(info, 'uOutput'), spec.output || 0);
     this._setControls(info, spec);
     gl.viewport(0, 0, w, h);
     gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
@@ -311,16 +320,36 @@ export class ShaderEngine {
   }
 
   // ── feedback / ping-pong simulations, one state per simKey ──────────────────
+  // The simple case (`feedback: true` alone) is one square RGBA32F grid ping-ponged
+  // through three phases selected by uPass: 2 seed · 0 step · 1 display.
+  //
+  // Two manifest keys widen that into a real solver without changing any of it:
+  //
+  //   simBuffers: N   ping-pong N grids at once, written together by MRT. Four
+  //                   channels is not enough state for a fluid (velocity, pressure,
+  //                   divergence AND premultiplied dye is eight), so the shader
+  //                   declares `layout(location=i) out vec4` per buffer and reads
+  //                   uState0…uStateN-1. N = 1 keeps the old single `uState` name.
+  //   simPasses: [..] run more than one step pass per frame, in order, each with
+  //                   uStage set to its number — an advect → curl → divergence →
+  //                   pressure → project pipeline instead of one fused step. An
+  //                   entry may be `{ stage, repeat }`, and `repeat` may name a
+  //                   control uniform, which is how a pressure solve gets its
+  //                   iteration count from a slider.
+  //
+  // Every pass writes every buffer (that is what MRT does), so a pass that only
+  // touches one of them copies the others straight through — the cost of a copy at
+  // sim resolution is nothing next to the clarity of one shader owning all the state.
   resetSim(key) {
     if (key === undefined) { for (const s of this.sims.values()) s.token = null; }
     else { const s = this.sims.get(key); if (s) s.token = null; }
   }
 
-  _ensureSim(key, size) {
+  _ensureSim(key, size, nbuf) {
     const gl = this.gl;
     let sim = this.sims.get(key);
-    if (sim && sim.size === size) return sim;
-    if (sim) { gl.deleteTexture(sim.texA); gl.deleteTexture(sim.texB); }
+    if (sim && sim.size === size && sim.a.length === nbuf) return sim;
+    if (sim) for (const t of sim.a.concat(sim.b)) gl.deleteTexture(t);
     const mk = () => {
       const t = gl.createTexture();
       gl.bindTexture(gl.TEXTURE_2D, t);
@@ -331,9 +360,31 @@ export class ShaderEngine {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       return t;
     };
-    sim = { size, texA: mk(), texB: mk(), token: null, frame: 0 };
+    const a = [], b = [];
+    for (let i = 0; i < nbuf; i++) { a.push(mk()); b.push(mk()); }
+    sim = { size, a, b, token: null, frame: 0 };
     this.sims.set(key, sim);
     return sim;
+  }
+
+  // uState (one buffer) or uState0…uStateN-1 (several)
+  _stateName(i, n) { return n === 1 ? 'uState' : 'uState' + i; }
+
+  _stages(spec) {
+    const list = (Array.isArray(spec.simPasses) && spec.simPasses.length) ? spec.simPasses : [0];
+    return list.map((s) => (typeof s === 'number' ? { stage: s } : s));
+  }
+
+  // A stage's repeat count: a number, or the name of a control uniform to read it
+  // from (so "Solver Quality" on the node face really is the Jacobi iteration count).
+  _repeat(st, spec) {
+    let r = st.repeat === undefined ? 1 : st.repeat;
+    if (typeof r === 'string') {
+      const fromParams = spec.params && spec.params[r];
+      const ctrl = (spec.controls || []).find((c) => c.uniform === r);
+      r = fromParams !== undefined ? fromParams : (ctrl ? ctrl.value : 1);
+    }
+    return Math.max(1, Math.min(200, Math.round(Number(r) || 1)));
   }
 
   _drawFeedback(spec, w, h) {
@@ -341,7 +392,8 @@ export class ShaderEngine {
     if (!this.floatRenderable)
       throw new Error('Feedback shaders need WebGL2 float render targets (EXT_color_buffer_float), unavailable here.');
     const size = Math.max(8, spec.simSize || 256);
-    const sim = this._ensureSim(spec.simKey || spec.key, size);
+    const nbuf = Math.max(1, Math.min(4, spec.simBuffers || 1));
+    const sim = this._ensureSim(spec.simKey || spec.key, size, nbuf);
     const target = gl.getParameter(gl.FRAMEBUFFER_BINDING);
     const info = this.ensureProgram(spec.key, spec.vertSrc, spec.fragSrc);
     gl.useProgram(info.prog);
@@ -350,37 +402,58 @@ export class ShaderEngine {
     this._setControls(info, spec);
     gl.uniform2f(this._loc(info, 'uSimRes'), size, size);
     gl.uniform1f(this._loc(info, 'uTime'), spec.time || 0);
+    const swap = () => { const t = sim.a; sim.a = sim.b; sim.b = t; };
 
     if (sim.token !== spec.resetToken) {
-      this._simPass(info, sim.texA, sim.texB, 2.0, size, stateUnit);
+      // Seed writes straight into the read set, so the display below shows the fresh
+      // state even on a frame where nothing steps.
+      this._simPass(info, sim.a, sim.b, 2.0, 0, 0, size, stateUnit);
       sim.token = spec.resetToken; sim.frame = 0;
     }
     if (spec.advance) {
-      this._simPass(info, sim.texB, sim.texA, 0.0, size, stateUnit);
-      const t = sim.texA; sim.texA = sim.texB; sim.texB = t; sim.frame++;
+      for (const st of this._stages(spec)) {
+        const n = this._repeat(st, spec);
+        for (let i = 0; i < n; i++) {
+          this._simPass(info, sim.b, sim.a, 0.0, st.stage || 0, i, size, stateUnit);
+          swap();
+        }
+      }
+      sim.frame++;
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, target);
     gl.viewport(0, 0, w, h);
-    gl.activeTexture(gl.TEXTURE0 + stateUnit);
-    gl.bindTexture(gl.TEXTURE_2D, sim.texA);
-    gl.uniform1i(this._loc(info, 'uState'), stateUnit);
+    for (let i = 0; i < nbuf; i++) {
+      gl.activeTexture(gl.TEXTURE0 + stateUnit + i);
+      gl.bindTexture(gl.TEXTURE_2D, sim.a[i]);
+      gl.uniform1i(this._loc(info, this._stateName(i, nbuf)), stateUnit + i);
+    }
     gl.uniform2f(this._loc(info, 'uResolution'), w, h);
     gl.uniform1f(this._loc(info, 'uPass'), 1.0);
+    gl.uniform1f(this._loc(info, 'uStage'), 0.0);
     gl.clearColor(0, 0, 0, 1); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
   }
 
-  _simPass(info, dstTex, srcTex, pass, size, stateUnit) {
+  _simPass(info, dst, src, pass, stage, iter, size, stateUnit) {
     const gl = this.gl;
+    const n = dst.length;
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.simFbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, dstTex, 0);
+    // Detach the slots this shader doesn't use: simFbo is shared, and a leftover
+    // attachment from a wider sim would still be a live render target here.
+    for (let i = 0; i < 4; i++)
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, i < n ? dst[i] : null, 0);
+    gl.drawBuffers(this.drawBufs[n]);
     gl.viewport(0, 0, size, size);
-    gl.activeTexture(gl.TEXTURE0 + stateUnit);
-    gl.bindTexture(gl.TEXTURE_2D, srcTex);
-    gl.uniform1i(this._loc(info, 'uState'), stateUnit);
+    for (let i = 0; i < n; i++) {
+      gl.activeTexture(gl.TEXTURE0 + stateUnit + i);
+      gl.bindTexture(gl.TEXTURE_2D, src[i]);
+      gl.uniform1i(this._loc(info, this._stateName(i, n)), stateUnit + i);
+    }
     gl.uniform2f(this._loc(info, 'uResolution'), size, size);
     gl.uniform1f(this._loc(info, 'uPass'), pass);
+    gl.uniform1f(this._loc(info, 'uStage'), stage);
+    gl.uniform1f(this._loc(info, 'uIter'), iter);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
