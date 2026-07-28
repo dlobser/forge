@@ -84,6 +84,7 @@ export default {
   history: false,                  // true → gets its own previous output as uPrev
   inputs: ["color", "depth"],      // textures it uses
   inputDefaults: { depth: "gray" },// solid to use when an input is unconnected
+  outputs: ["out"],                // more than one → several output pins (see below)
   controls: [
     { uniform: "uAmount", label: "Amount", type: "range", min: 0, max: 1, step: 0.01, value: 0.5 },
     { uniform: "uTint",   label: "Tint",   type: "color", value: [1, 1, 1] },
@@ -105,6 +106,12 @@ before categories existed name their nodes `forge/shader/<key>`; those names are
 resolved to the new ones on load (see `LEGACY` in nodes.js) and rewritten on the
 next save.
 
+**Several outputs.** `outputs: ["selected", "R", "G", "B", "A"]` gives the node one
+IMAGE pin per name. The node renders the same program once per pin with `uOutput`
+set to that pin's index, so the shader branches on it — see splitChannels.frag. The
+first pin is what the node's thumbnail and fullscreen show. Not available on a
+stateful shader (one draw per pin would step its simulation N times a frame).
+
 Three kinds of statefulness, and they are not interchangeable:
 
 | flag              | state kept                                    | for |
@@ -118,6 +125,22 @@ A `history`/`feedback` shader steps once per frame while the transport is playin
 and is frozen by pause. Its state survives changes to its inputs — swapping the
 image feeding a Kuramoto field steers the running simulation instead of reseeding
 it; only ↺ reset, a sim-grid change, or a resolution change starts over.
+
+A `feedback` shader may also widen its state and its step, which is what a real
+solver needs (fluid.frag uses both):
+
+```js
+simSizes: [128, 256, 512, 1024],          // what the "sim grid" combo offers
+simBuffers: 2,                            // N ping-pong RGBA32F grids, written by MRT
+simPasses: [1, 2, 3, { stage: 4, repeat: "uPressureIters" }, 5],
+```
+
+`simBuffers: N` means the shader declares `layout(location = i) out vec4` per buffer
+and reads `uState0 … uStateN-1` (with N = 1 it stays the plain `uState`). Every pass
+writes every buffer, so a pass that only touches one copies the others through.
+`simPasses` runs more than one step pass per frame, in order, with `uStage` set to
+each entry's number and `uIter` to the repeat index; a `repeat` may name a control
+uniform, which is how a pressure solve takes its iteration count from a slider.
 
 **Sampling.** Every texture is point-filtered (`NEAREST`), so a long chain doesn't
 accumulate a little bilinear softness at every hop. Shaders that genuinely need

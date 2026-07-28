@@ -250,6 +250,23 @@ function ensureOut(node) {
   if (!node._out) node._out = { tex: RT.engine.allocTexture(node._size.width, node._size.height), width: node._size.width, height: node._size.height, version: 0 };
   return node._out;
 }
+// Same, for a shader whose manifest declares several `outputs`: one texture per
+// output slot, all at the node's render size. _out stays the first one, so the
+// thumbnail, fullscreen and download paths keep working unchanged.
+function ensureOuts(node, count) {
+  const w = node._size.width, h = node._size.height;
+  if (node._outs && (node._outs.length !== count || node._outs[0].width !== w || node._outs[0].height !== h)) {
+    for (const o of node._outs) RT.engine.gl.deleteTexture(o.tex);
+    node._outs = null;
+  }
+  if (!node._outs) {
+    node._outs = [];
+    for (let i = 0; i < count; i++)
+      node._outs.push({ tex: RT.engine.allocTexture(w, h), width: w, height: h, version: 0 });
+  }
+  node._out = node._outs[0];
+  return node._outs;
+}
 function setImageOut(node, img) {
   node._tex = RT.engine.texFor(img);
   const width = img.naturalWidth || img.width || RT.RENDER_SIZE, height = img.naturalHeight || img.height || RT.RENDER_SIZE;
@@ -670,14 +687,20 @@ function makeShaderNode(def) {
   const labels = def.inputLabels || {};
   // numeric controls also get an optional float input pin (drive them with math nodes)
   const pinnable = (def.controls || []).filter((c) => c.type === 'range' || c.type === 'number' || c.type === 'bool');
+  // A manifest may declare several `outputs` (e.g. Split Channels' R/G/B/A). The
+  // node then renders the same program once per slot with uOutput set to its index.
+  // Not for stateful shaders: those step their simulation inside the draw, so one
+  // draw per slot would run the sim N times a frame.
+  const outputs = (!def.feedback && !def.history && Array.isArray(def.outputs) && def.outputs.length)
+    ? def.outputs : ['out'];
   function Node() {
     for (const name of inputs) this.addInput(labels[name] || name, IMG);
     // pinnable controls default to slider mode (no input pin); toggle via right-click
-    this.addOutput('out', IMG);
+    for (const o of outputs) this.addOutput(o, IMG);
     this.properties = { params: {}, pinModes: {}, simSize: def.simSize || 256, animate: false };
     addShaderWidgets(this, def);
     if (def.feedback) {
-      this.addWidget('combo', 'sim grid', this.properties.simSize, (v) => { this.properties.simSize = +v; this._seed = (this._seed || 0) + 1; RT.requestSave(); }, { values: [128, 256, 512] });
+      this.addWidget('combo', 'sim grid', this.properties.simSize, (v) => { this.properties.simSize = +v; this._seed = (this._seed || 0) + 1; RT.requestSave(); }, { values: def.simSizes || [128, 256, 512] });
       this.addWidget('button', '↺ reset sim', null, () => { RT.engine.resetSim('n' + this.id); this._seed = (this._seed || 0) + 1; });
     } else if (def.history) {
       // history shaders run at full output resolution, so there is no sim grid to
@@ -741,13 +764,14 @@ function makeShaderNode(def) {
     const vkey = vers.join(',');
     const pkey = JSON.stringify(params) + '|' + this.properties.simSize + '|' + (this._seed || 0) + '|' + (this.properties.animate ? 1 : 0) + '|' + this._size.width + 'x' + this._size.height;
     if (this._dirty || animate || vkey !== this._vkey || pkey !== this._pkey) {
-      ensureOut(this);
+      const outs = ensureOuts(this, outputs.length);
       const simSize = +this.properties.simSize || def.simSize || 256;
-      RT.engine.renderToTexture({
+      const spec = {
         key: def.key, vertSrc: def.vertSrc, fragSrc: def.fragSrc,
         controls: def.controls || [], params,
         inputs, inputTextures: inTex, inputDefaults: def.inputDefaults,
-        feedback, history, simSize, simKey: 'n' + this.id, histKey: 'n' + this.id,
+        feedback, history, simSize, simBuffers: def.simBuffers, simPasses: def.simPasses,
+        simKey: 'n' + this.id, histKey: 'n' + this.id,
         advance: (feedback || history) && RT.advance, time: RT.time, frame: RT.frame,
         // A simulation's reset token deliberately does NOT include the input image
         // versions. It used to, which meant swapping or re-rendering an upstream
@@ -757,11 +781,17 @@ function makeShaderNode(def) {
         // reset, a sim-grid change, or a resolution change starts it over now.
         resetToken: 'n' + this.id + '|' + simSize + '|' + (this._seed || 0)
           + (history ? '|' + this._size.width + 'x' + this._size.height : ''),
-      }, this._out.tex, this._size.width, this._size.height);
-      this._out.version++;
+      };
+      // One draw per output slot. A stateful shader has exactly one output (a sim
+      // would otherwise step once per slot), so this loop runs once for those.
+      for (let i = 0; i < outs.length; i++) {
+        spec.output = i;
+        RT.engine.renderToTexture(spec, outs[i].tex, this._size.width, this._size.height);
+        outs[i].version++;
+      }
       this._dirty = false; this._vkey = vkey; this._pkey = pkey;
     }
-    this.setOutputData(0, this._out);
+    if (this._outs) for (let i = 0; i < outputs.length; i++) this.setOutputData(i, this._outs[i]);
   };
   Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this); };
   if ((def.controls || []).some((c) => c.uniform === 'uPickX')) {
