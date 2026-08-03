@@ -73,15 +73,21 @@
       "vert": null
     },
     {
-      "key": "framebuffer",
-      "js": "/shaders/framebuffer.js",
-      "frag": "/shaders/framebuffer.frag",
-      "vert": null
-    },
-    {
       "key": "floodFill",
       "js": "/shaders/floodFill.js",
       "frag": "/shaders/floodFill.frag",
+      "vert": null
+    },
+    {
+      "key": "fluid",
+      "js": "/shaders/fluid.js",
+      "frag": "/shaders/fluid.frag",
+      "vert": null
+    },
+    {
+      "key": "framebuffer",
+      "js": "/shaders/framebuffer.js",
+      "frag": "/shaders/framebuffer.frag",
       "vert": null
     },
     {
@@ -166,6 +172,12 @@
       "key": "smoothstep",
       "js": "/shaders/smoothstep.js",
       "frag": "/shaders/smoothstep.frag",
+      "vert": null
+    },
+    {
+      "key": "splitChannels",
+      "js": "/shaders/splitChannels.js",
+      "frag": "/shaders/splitChannels.frag",
       "vert": null
     },
     {

@@ -42,7 +42,8 @@ export function normalizeDefs(raw) {
     key: d.key, name: d.def.name, category: d.def.category, vertSrc: d.vertSrc, fragSrc: d.fragSrc,
     inputs: d.def.inputs, inputLabels: d.def.inputLabels, inputDefaults: d.def.inputDefaults,
     controls: d.def.controls, feedback: d.def.feedback, history: d.def.history,
-    animated: d.def.animated, simSize: d.def.simSize,
+    animated: d.def.animated, simSize: d.def.simSize, simSizes: d.def.simSizes,
+    simBuffers: d.def.simBuffers, simPasses: d.def.simPasses, outputs: d.def.outputs,
   }));
 }
 
