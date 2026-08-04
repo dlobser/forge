@@ -4,7 +4,6 @@ precision highp float;
 
 uniform sampler2D uState;
 uniform vec2 uSimRes;
-uniform vec2 uResolution;
 uniform float uPointSize;
 
 void main()
@@ -13,8 +12,7 @@ void main()
     int x = gl_VertexID % simWidth;
     int y = gl_VertexID / simWidth;
 
-    vec2 uv = (vec2(float(x), float(y)) + 0.5) / uSimRes;
-    vec2 position = texture(uState, uv).rg;
+    vec2 position = texelFetch(uState, ivec2(x, y), 0).rg;
 
     vec2 clipPosition = position * 2.0 - 1.0;
 

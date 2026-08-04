@@ -881,83 +881,104 @@ function makeShaderNode(def) {
   LG.registerNodeType(type, Node);
 }
 
-const particleSourceCache = new Map();
 
-function loadParticleSources(def) {
-    if (particleSourceCache.has(def.key)) return particleSourceCache.get(def.key);
-
-    const load = async (file) => {
-        const res = await fetch('/shaders/' + file);
-        if (!res.ok) throw new Error('Could not load particle shader: ' + file);
-        return res.text();
+// ── Declarative GPU pipeline nodes ─────────────────────────────────────────────
+// A pipeline node owns a ping-pong RGBA32F state texture and renders that state
+// with a declared primitive. The node layer handles UI/lifecycle; the engine stays
+// generic and only provides state-pass and draw-pass operations.
+const pipelineSourceCache = new Map();
+// The manifest uses flat fields because Forge's shader scanner currently preserves
+// top-level values, but does not reliably preserve nested pipeline objects.
+function pipelineFromDef(def) {
+    return {
+        stateSize: def.simSize,
+        stateSizes: def.simSizes,
+        sizeLabel: def.sizeLabel,
+        resetLabel: def.resetLabel,
+        update: {
+            vert: def.updateVert,
+            frag: def.updateFrag,
+        },
+        render: {
+            vert: def.renderVert,
+            frag: def.renderFrag,
+            blend: def.blend,
+            blendControl: def.blendControl,
+        },
     };
+}
 
-    const promise = Promise.all([
-        load(def.updateVert),
-        load(def.updateFrag),
-        load(def.renderVert),
-        load(def.renderFrag),
-    ]).then(([updateVertSrc, updateFragSrc, renderVertSrc, renderFragSrc]) => {
-        def.updateVertSrc = updateVertSrc;
-        def.updateFragSrc = updateFragSrc;
-        def.renderVertSrc = renderVertSrc;
-        def.renderFragSrc = renderFragSrc;
-        return def;
-    });
+function loadPipelineSources(def) {
+    if (pipelineSourceCache.has(def.key)) return pipelineSourceCache.get(def.key);
 
-    particleSourceCache.set(def.key, promise);
+    const stages = pipelineFromDef(def);
+    const files = [
+        stages.update && stages.update.vert,
+        stages.update && stages.update.frag,
+        stages.render && stages.render.vert,
+        stages.render && stages.render.frag,
+    ];
+
+    const promise = Promise.all(files.map(async (file) => {
+        if (!file) throw new Error('Incomplete pipeline declaration for ' + def.key);
+        const res = await fetch('/shaders/' + file);
+        if (!res.ok) throw new Error('Could not load pipeline shader: ' + file);
+        return res.text();
+    })).then(([updateVertSrc, updateFragSrc, renderVertSrc, renderFragSrc]) => ({
+        updateVertSrc,
+        updateFragSrc,
+        renderVertSrc,
+        renderFragSrc,
+    }));
+
+    pipelineSourceCache.set(def.key, promise);
     return promise;
 }
 
-// ── GPU particle shader (update pass + point render pass) ─────────────────────
-function makeParticleNode(def) {
+function makePipelineNode(def) {
+    const pipeline = pipelineFromDef(def);
     const controls = def.controls || [];
-
-    def.updateVert = def.updateVert || 'gpuParticlesUpdate.vert';
-    def.updateFrag = def.updateFrag || 'gpuParticlesUpdate.frag';
-    def.renderVert = def.renderVert || 'gpuParticlesRender.vert';
-    def.renderFrag = def.renderFrag || 'gpuParticlesRender.frag';
+    const controlValue = (params, uniform) => {
+        if (params[uniform] !== undefined) return params[uniform];
+        const control = controls.find((item) => item.uniform === uniform);
+        return control ? control.value : 0;
+    };
 
     function Node() {
         this.addOutput('out', IMG);
         this.properties = {
             params: {},
-            simSize: def.simSize || 64,
+            simSize: pipeline.stateSize || 64,
         };
 
         addShaderWidgets(this, def);
 
-        this._particleReady = false;
-        this._status = 'loading particle shaders…';
+        this._pipelineSources = null;
+        this._status = 'loading pipeline shaders…';
         this._statusColor = '#ffcc66';
 
-        loadParticleSources(def)
-            .then(() => {
-                this._particleReady = true;
+        loadPipelineSources(def)
+            .then((sources) => {
+                this._pipelineSources = sources;
                 this._status = null;
                 this._dirty = true;
                 RT.redraw();
             })
             .catch((e) => {
-                this._particleReady = false;
-                this._status = 'particle shader load failed';
+                this._status = 'pipeline shader load failed';
                 this._statusColor = '#ff6666';
                 console.error(e);
                 RT.redraw();
             });
 
-        this.addWidget('combo', 'particle grid', this.properties.simSize, (v) => {
+        this.addWidget('combo', pipeline.sizeLabel || 'state grid', this.properties.simSize, (v) => {
             this.properties.simSize = +v;
-            this._seed = (this._seed || 0) + 1;
-            RT.engine.resetStateBuffer('n' + this.id);
-            this._dirty = true;
+            this._resetPipeline();
             RT.requestSave();
-        }, { values: def.simSizes || [32, 64, 128, 256] });
+        }, { values: pipeline.stateSizes || [32, 64, 128, 256] });
 
-        this.addWidget('button', '↺ reset particles', null, () => {
-            this._seed = (this._seed || 0) + 1;
-            RT.engine.resetStateBuffer('n' + this.id);
-            this._dirty = true;
+        this.addWidget('button', pipeline.resetLabel || '↺ reset state', null, () => {
+            this._resetPipeline();
             RT.redraw();
         });
 
@@ -971,22 +992,32 @@ function makeParticleNode(def) {
 
     Node.title = def.name || def.key;
 
+    Node.prototype._stateKey = function () {
+        return 'n' + this.id;
+    };
+
+    Node.prototype._resetPipeline = function () {
+        this._seed = (this._seed || 0) + 1;
+        RT.engine.resetStateBuffer(this._stateKey());
+    };
+
     Node.prototype.onConfigure = function () {
         if (this.properties.simSize === undefined)
-            this.properties.simSize = def.simSize || 64;
+            this.properties.simSize = pipeline.stateSize || 64;
 
         this.properties.params = this.properties.params || {};
-        setWidget(this, 'particle grid', this.properties.simSize);
+        setWidget(this, pipeline.sizeLabel || 'state grid', this.properties.simSize);
         syncShaderWidgets(this);
         this._dirty = true;
     };
 
     Node.prototype.evaluate = function () {
-        if (!this._particleReady) return;
+        const sources = this._pipelineSources;
+        if (!sources) return;
 
         const params = Object.assign({}, this.properties.params);
-        const simSize = Math.max(8, +this.properties.simSize || def.simSize || 64);
-        const stateKey = 'n' + this.id;
+        const simSize = Math.max(8, +this.properties.simSize || pipeline.stateSize || 64);
+        const stateKey = this._stateKey();
 
         this._size = nodeRenderSize(this);
         ensureOut(this);
@@ -994,57 +1025,44 @@ function makeParticleNode(def) {
         const state = RT.engine.ensureStateBuffer(stateKey, simSize);
         const resetToken = stateKey + '|' + simSize + '|' + (this._seed || 0);
 
-        if (state.token !== resetToken) {
+        const runUpdate = (reset) => {
             RT.engine.runStatePass({
-                key: def.key + '_update',
-                vertSrc: def.updateVertSrc,
-                fragSrc: def.updateFragSrc,
+                key: def.key + ':update',
+                vertSrc: sources.updateVertSrc,
+                fragSrc: sources.updateFragSrc,
                 srcTex: state.a,
                 dstTex: state.b,
                 size: simSize,
                 uniforms: {
-                    uReset: 1,
-                    uDeltaTime: 0,
-                    uSpeed: Number(params.uSpeed ?? controlValue('uSpeed')),
-                    uSpread: Number(params.uSpread ?? controlValue('uSpread')),
-                    uSeed: this._seed || 0,
+                    uReset: reset ? 1 : 0,
+                    uDeltaTime: reset ? 0 : Math.min(0.05, Math.max(0, RT.dt || 1 / 60)),
+                    uSpeed: Number(controlValue(params, 'uSpeed')),
+                    uSpread: Number(controlValue(params, 'uSpread')),
+                    uSeed: (this._seed || 0) + (reset ? 0 : state.frame * 0.001),
                 },
             });
 
-            const t = state.a;
+            const texture = state.a;
             state.a = state.b;
-            state.b = t;
+            state.b = texture;
+        };
+
+        if (state.token !== resetToken) {
+            runUpdate(true);
             state.token = resetToken;
             state.frame = 0;
             this._dirty = true;
         }
 
         if (RT.advance) {
-            RT.engine.runStatePass({
-                key: def.key + '_update',
-                vertSrc: def.updateVertSrc,
-                fragSrc: def.updateFragSrc,
-                srcTex: state.a,
-                dstTex: state.b,
-                size: simSize,
-                uniforms: {
-                    uReset: 0,
-                    uDeltaTime: Math.min(0.05, Math.max(0, RT.dt || 1 / 60)),
-                    uSpeed: Number(params.uSpeed ?? controlValue('uSpeed')),
-                    uSpread: Number(params.uSpread ?? controlValue('uSpread')),
-                    uSeed: (this._seed || 0) + state.frame * 0.001,
-                },
-            });
-
-            const t = state.a;
-            state.a = state.b;
-            state.b = t;
+            runUpdate(false);
             state.frame++;
         }
 
-        const pointSize = Number(params.uPointSize ?? controlValue('uPointSize'));
-        const color = params.uParticleColor ?? controlValue('uParticleColor');
-        const additive = params.uAdditive ?? controlValue('uAdditive');
+        const blendControl = pipeline.render.blendControl;
+        const blendEnabled = blendControl
+            ? controlValue(params, blendControl) !== false
+            : true;
 
         const pkey = JSON.stringify(params)
             + '|' + simSize
@@ -1053,20 +1071,20 @@ function makeParticleNode(def) {
 
         if (this._dirty || RT.advance || pkey !== this._pkey) {
             RT.engine.renderPointsToTexture({
-                key: def.key + '_render',
-                vertSrc: def.renderVertSrc,
-                fragSrc: def.renderFragSrc,
+                key: def.key + ':render',
+                vertSrc: sources.renderVertSrc,
+                fragSrc: sources.renderFragSrc,
                 stateTex: state.a,
                 targetTex: this._out.tex,
                 width: this._size.width,
                 height: this._size.height,
                 count: simSize * simSize,
-                blend: additive !== false ? 'additive' : 'alpha',
+                blend: blendEnabled ? (pipeline.render.blend || 'additive') : 'alpha',
                 uniforms: {
                     uSimRes: [simSize, simSize],
                     uResolution: [this._size.width, this._size.height],
-                    uPointSize: pointSize || 1,
-                    uParticleColor: Array.isArray(color) ? color : [1, 1, 1],
+                    uPointSize: Number(controlValue(params, 'uPointSize')) || 1,
+                    uParticleColor: controlValue(params, 'uParticleColor') || [1, 1, 1],
                 },
             });
 
@@ -1076,15 +1094,10 @@ function makeParticleNode(def) {
         }
 
         this.setOutputData(0, this._out);
-
-        function controlValue(uniform) {
-            const c = controls.find((item) => item.uniform === uniform);
-            return c ? c.value : 0;
-        }
     };
 
     Node.prototype.onRemoved = function () {
-        RT.engine.deleteStateBuffer('n' + this.id);
+        RT.engine.deleteStateBuffer(this._stateKey());
     };
 
     Node.prototype.onDblClick = function () {
@@ -1117,12 +1130,10 @@ function makeParticleNode(def) {
                             delete node.properties.renderHeight;
                         } else {
                             let m = String(val).match(/(\d+)\s*[×x]\s*(\d+)/i);
-
                             if (String(val).startsWith('custom'))
                                 m = String(prompt('Render size (width x height):', current.width + 'x' + current.height) || '').match(/(\d+)\s*[×x]\s*(\d+)/i);
 
                             if (!m || +m[1] < 64 || +m[2] < 64) return;
-
                             node.properties.renderWidth = +m[1];
                             node.properties.renderHeight = +m[2];
                         }
@@ -1141,6 +1152,7 @@ function makeParticleNode(def) {
     LEGACY['forge/shader/' + def.key] = type;
     LG.registerNodeType(type, Node);
 }
+
 
 // ── Depth (auto-bakes via ComfyUI on input change) ─────────────────────────────
 function DepthNode() {
@@ -1705,14 +1717,14 @@ export function registerNodes() {
           def.particleSystem === true ||
           def.key === 'gpuParticles' ||
             (
-                def.updateVert &&
-                def.updateFrag &&
-                def.renderVert &&
-                def.renderFrag
+                !!def.updateVert &&
+                !!def.updateFrag &&
+                !!def.renderVert &&
+                !!def.renderFrag
             );
 
         if (isParticleSystem) {
-            makeParticleNode(def);
+            makePipelineNode(def);
         } else {
             makeShaderNode(def);
         }

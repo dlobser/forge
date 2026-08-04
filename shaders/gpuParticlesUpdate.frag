@@ -6,7 +6,6 @@ in vec2 vUv;
 out vec4 fragColor;
 
 uniform sampler2D uState;
-uniform vec2 uSimRes;
 
 uniform float uReset;
 uniform float uDeltaTime;
@@ -49,8 +48,7 @@ void main()
         return;
     }
 
-    vec2 uv = (id + 0.5) / uSimRes;
-    vec4 state = texture(uState, uv);
+    vec4 state = texelFetch(uState, ivec2(id), 0);
 
     vec2 position = state.rg;
     vec2 velocity = state.ba;

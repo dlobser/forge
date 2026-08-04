@@ -1,20 +1,24 @@
-// GPU Particles — a texture-backed particle simulation. Each texel stores one
-// particle as position.xy + velocity.xy. The update pass advances the state in an
-// RGBA32F ping-pong buffer; the render pass draws one GL point per texel.
 export default {
     name: "GPU Particles",
     category: "generate",
-    animated: true,
-    particleSystem: true,
     inputs: [],
+
+    particleSystem: true,
 
     simSize: 64,
     simSizes: [32, 64, 128, 256],
+
+    sizeLabel: "particle grid",
+    resetLabel: "↺ reset particles",
 
     updateVert: "gpuParticlesUpdate.vert",
     updateFrag: "gpuParticlesUpdate.frag",
     renderVert: "gpuParticlesRender.vert",
     renderFrag: "gpuParticlesRender.frag",
+
+    primitive: "points",
+    blend: "additive",
+    blendControl: "uAdditive",
 
     controls: [
         { uniform: "uSpeed", label: "Speed", type: "range", min: 0, max: 1, step: 0.01, value: 0.18 },
