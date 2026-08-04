@@ -881,6 +881,267 @@ function makeShaderNode(def) {
   LG.registerNodeType(type, Node);
 }
 
+const particleSourceCache = new Map();
+
+function loadParticleSources(def) {
+    if (particleSourceCache.has(def.key)) return particleSourceCache.get(def.key);
+
+    const load = async (file) => {
+        const res = await fetch('/shaders/' + file);
+        if (!res.ok) throw new Error('Could not load particle shader: ' + file);
+        return res.text();
+    };
+
+    const promise = Promise.all([
+        load(def.updateVert),
+        load(def.updateFrag),
+        load(def.renderVert),
+        load(def.renderFrag),
+    ]).then(([updateVertSrc, updateFragSrc, renderVertSrc, renderFragSrc]) => {
+        def.updateVertSrc = updateVertSrc;
+        def.updateFragSrc = updateFragSrc;
+        def.renderVertSrc = renderVertSrc;
+        def.renderFragSrc = renderFragSrc;
+        return def;
+    });
+
+    particleSourceCache.set(def.key, promise);
+    return promise;
+}
+
+// ── GPU particle shader (update pass + point render pass) ─────────────────────
+function makeParticleNode(def) {
+    const controls = def.controls || [];
+
+    def.updateVert = def.updateVert || 'gpuParticlesUpdate.vert';
+    def.updateFrag = def.updateFrag || 'gpuParticlesUpdate.frag';
+    def.renderVert = def.renderVert || 'gpuParticlesRender.vert';
+    def.renderFrag = def.renderFrag || 'gpuParticlesRender.frag';
+
+    function Node() {
+        this.addOutput('out', IMG);
+        this.properties = {
+            params: {},
+            simSize: def.simSize || 64,
+        };
+
+        addShaderWidgets(this, def);
+
+        this._particleReady = false;
+        this._status = 'loading particle shaders…';
+        this._statusColor = '#ffcc66';
+
+        loadParticleSources(def)
+            .then(() => {
+                this._particleReady = true;
+                this._status = null;
+                this._dirty = true;
+                RT.redraw();
+            })
+            .catch((e) => {
+                this._particleReady = false;
+                this._status = 'particle shader load failed';
+                this._statusColor = '#ff6666';
+                console.error(e);
+                RT.redraw();
+            });
+
+        this.addWidget('combo', 'particle grid', this.properties.simSize, (v) => {
+            this.properties.simSize = +v;
+            this._seed = (this._seed || 0) + 1;
+            RT.engine.resetStateBuffer('n' + this.id);
+            this._dirty = true;
+            RT.requestSave();
+        }, { values: def.simSizes || [32, 64, 128, 256] });
+
+        this.addWidget('button', '↺ reset particles', null, () => {
+            this._seed = (this._seed || 0) + 1;
+            RT.engine.resetStateBuffer('n' + this.id);
+            this._dirty = true;
+            RT.redraw();
+        });
+
+        this._def = def;
+        this._size = { width: RT.RENDER_SIZE, height: RT.RENDER_SIZE };
+        this._dirty = true;
+
+        attachThumb(this);
+        sizeWithThumb(this);
+    }
+
+    Node.title = def.name || def.key;
+
+    Node.prototype.onConfigure = function () {
+        if (this.properties.simSize === undefined)
+            this.properties.simSize = def.simSize || 64;
+
+        this.properties.params = this.properties.params || {};
+        setWidget(this, 'particle grid', this.properties.simSize);
+        syncShaderWidgets(this);
+        this._dirty = true;
+    };
+
+    Node.prototype.evaluate = function () {
+        if (!this._particleReady) return;
+
+        const params = Object.assign({}, this.properties.params);
+        const simSize = Math.max(8, +this.properties.simSize || def.simSize || 64);
+        const stateKey = 'n' + this.id;
+
+        this._size = nodeRenderSize(this);
+        ensureOut(this);
+
+        const state = RT.engine.ensureStateBuffer(stateKey, simSize);
+        const resetToken = stateKey + '|' + simSize + '|' + (this._seed || 0);
+
+        if (state.token !== resetToken) {
+            RT.engine.runStatePass({
+                key: def.key + '_update',
+                vertSrc: def.updateVertSrc,
+                fragSrc: def.updateFragSrc,
+                srcTex: state.a,
+                dstTex: state.b,
+                size: simSize,
+                uniforms: {
+                    uReset: 1,
+                    uDeltaTime: 0,
+                    uSpeed: Number(params.uSpeed ?? controlValue('uSpeed')),
+                    uSpread: Number(params.uSpread ?? controlValue('uSpread')),
+                    uSeed: this._seed || 0,
+                },
+            });
+
+            const t = state.a;
+            state.a = state.b;
+            state.b = t;
+            state.token = resetToken;
+            state.frame = 0;
+            this._dirty = true;
+        }
+
+        if (RT.advance) {
+            RT.engine.runStatePass({
+                key: def.key + '_update',
+                vertSrc: def.updateVertSrc,
+                fragSrc: def.updateFragSrc,
+                srcTex: state.a,
+                dstTex: state.b,
+                size: simSize,
+                uniforms: {
+                    uReset: 0,
+                    uDeltaTime: Math.min(0.05, Math.max(0, RT.dt || 1 / 60)),
+                    uSpeed: Number(params.uSpeed ?? controlValue('uSpeed')),
+                    uSpread: Number(params.uSpread ?? controlValue('uSpread')),
+                    uSeed: (this._seed || 0) + state.frame * 0.001,
+                },
+            });
+
+            const t = state.a;
+            state.a = state.b;
+            state.b = t;
+            state.frame++;
+        }
+
+        const pointSize = Number(params.uPointSize ?? controlValue('uPointSize'));
+        const color = params.uParticleColor ?? controlValue('uParticleColor');
+        const additive = params.uAdditive ?? controlValue('uAdditive');
+
+        const pkey = JSON.stringify(params)
+            + '|' + simSize
+            + '|' + this._size.width + 'x' + this._size.height
+            + '|' + (this._seed || 0);
+
+        if (this._dirty || RT.advance || pkey !== this._pkey) {
+            RT.engine.renderPointsToTexture({
+                key: def.key + '_render',
+                vertSrc: def.renderVertSrc,
+                fragSrc: def.renderFragSrc,
+                stateTex: state.a,
+                targetTex: this._out.tex,
+                width: this._size.width,
+                height: this._size.height,
+                count: simSize * simSize,
+                blend: additive !== false ? 'additive' : 'alpha',
+                uniforms: {
+                    uSimRes: [simSize, simSize],
+                    uResolution: [this._size.width, this._size.height],
+                    uPointSize: pointSize || 1,
+                    uParticleColor: Array.isArray(color) ? color : [1, 1, 1],
+                },
+            });
+
+            this._out.version++;
+            this._dirty = false;
+            this._pkey = pkey;
+        }
+
+        this.setOutputData(0, this._out);
+
+        function controlValue(uniform) {
+            const c = controls.find((item) => item.uniform === uniform);
+            return c ? c.value : 0;
+        }
+    };
+
+    Node.prototype.onRemoved = function () {
+        RT.engine.deleteStateBuffer('n' + this.id);
+    };
+
+    Node.prototype.onDblClick = function () {
+        if (this._out && this._out.tex) openFull(this);
+    };
+
+    Node.prototype.getExtraMenuOptions = function () {
+        const node = this;
+        const current = this._size || nodeRenderSize(this);
+
+        return [{
+            content: 'Render size: ' + current.width + ' × ' + current.height,
+            has_submenu: true,
+            callback: function (_v, _opts, e, menu) {
+                new LG.ContextMenu([
+                    'default',
+                    '512 × 512',
+                    '1024 × 1024',
+                    '1920 × 1080',
+                    '1080 × 1920',
+                    '2048 × 1024',
+                    '1024 × 2048',
+                    'custom…',
+                ], {
+                    event: e,
+                    parentMenu: menu,
+                    callback: function (val) {
+                        if (val === 'default') {
+                            delete node.properties.renderWidth;
+                            delete node.properties.renderHeight;
+                        } else {
+                            let m = String(val).match(/(\d+)\s*[×x]\s*(\d+)/i);
+
+                            if (String(val).startsWith('custom'))
+                                m = String(prompt('Render size (width x height):', current.width + 'x' + current.height) || '').match(/(\d+)\s*[×x]\s*(\d+)/i);
+
+                            if (!m || +m[1] < 64 || +m[2] < 64) return;
+
+                            node.properties.renderWidth = +m[1];
+                            node.properties.renderHeight = +m[2];
+                        }
+
+                        delete node.properties.renderSize;
+                        node._dirty = true;
+                        RT.requestSave();
+                        RT.redraw();
+                    },
+                });
+            },
+        }];
+    };
+
+    const type = (def.category || 'generate') + '/' + def.key;
+    LEGACY['forge/shader/' + def.key] = type;
+    LG.registerNodeType(type, Node);
+}
+
 // ── Depth (auto-bakes via ComfyUI on input change) ─────────────────────────────
 function DepthNode() {
   this.addInput('image', IMG); this.addOutput('depth', IMG);
@@ -1160,6 +1421,7 @@ SequenceNode.prototype._render = async function () {
   RT.advance = true;            // force feedback + animated shaders to step
   try {
     RT.engine.resetSim();                       // reseed all feedback sims
+    RT.engine.resetStateBuffer();
     await RT.api.seqClear(RT.project, name);
     for (let i = 0; i < n; i++) {
       RT.time = i / fps;                        // advance time so animated shaders move
@@ -1438,7 +1700,23 @@ export function registerNodes() {
   LG.registerNodeType(T.SAVE, SaveNode);
   LG.registerNodeType(T.SEQUENCE, SequenceNode);
   LG.registerNodeType(T.PASS_THROUGH, PassThroughNode);
-  for (const def of RT.shaderDefs) makeShaderNode(def);
+  for (const def of RT.shaderDefs) {
+      const isParticleSystem =
+          def.particleSystem === true ||
+          def.key === 'gpuParticles' ||
+            (
+                def.updateVert &&
+                def.updateFrag &&
+                def.renderVert &&
+                def.renderFrag
+            );
+
+        if (isParticleSystem) {
+            makeParticleNode(def);
+        } else {
+            makeShaderNode(def);
+        }
+  }
   for (const wf of RT.workflows) makeAiNode(wf);
   for (const m of RT.mathDefs) makeMathNode(m);
   registerBuiltins();
