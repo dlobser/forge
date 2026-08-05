@@ -56,6 +56,7 @@ export class ShaderEngine {
     this.copyFbo = gl.createFramebuffer();   // for texture→texture copies (history)
     this.sims = new Map();
     this.hist = new Map();                   // full-resolution history buffers
+    this.stateBuffers = new Map();           // generic RGBA32F ping-pong state buffers
     // drawBuffers argument per attachment count, so a multi-target sim pass doesn't
     // rebuild the array 40 times a frame. Index = number of targets.
     this.drawBufs = [[gl.NONE]];
@@ -456,6 +457,115 @@ export class ShaderEngine {
     gl.uniform1f(this._loc(info, 'uIter'), iter);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
+
+    // ── generic GPU state buffers ───────────────────────────────────────────────
+    // One RGBA32F texel represents one simulation item. The engine does not assign
+    // meaning to its channels: a particle node can use position.xy and velocity.xy,
+    // while another simulation can store completely different state.
+    ensureStateBuffer(key, size) {
+        const gl = this.gl;
+        if (!this.floatRenderable)
+            throw new Error('GPU state buffers need WebGL2 float render targets (EXT_color_buffer_float), unavailable here.');
+        size = Math.max(8, size | 0);
+        let state = this.stateBuffers.get(key);
+        if (state && state.size === size) return state;
+        if (state) { gl.deleteTexture(state.a); gl.deleteTexture(state.b); }
+        const mk = () => {
+            const t = gl.createTexture();
+            gl.bindTexture(gl.TEXTURE_2D, t);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, size, size, 0, gl.RGBA, gl.FLOAT, null);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+            return t;
+        };
+        state = { size, a: mk(), b: mk(), token: null, frame: 0 };
+        this.stateBuffers.set(key, state);
+        return state;
+    }
+
+    resetStateBuffer(key) {
+        if (key === undefined) { for (const state of this.stateBuffers.values()) state.token = null; }
+        else { const state = this.stateBuffers.get(key); if (state) state.token = null; }
+    }
+
+    deleteStateBuffer(key) {
+        const state = this.stateBuffers.get(key);
+        if (!state) return;
+        const gl = this.gl;
+        gl.deleteTexture(state.a);
+        gl.deleteTexture(state.b);
+        this.stateBuffers.delete(key);
+    }
+
+    _setGenericUniforms(info, uniforms) {
+        const gl = this.gl;
+        for (const [name, value] of Object.entries(uniforms || {})) {
+            const loc = this._loc(info, name);
+            if (loc === null || value === undefined || value === null) continue;
+            if (typeof value === 'boolean') gl.uniform1f(loc, value ? 1 : 0);
+            else if (typeof value === 'number') gl.uniform1f(loc, value);
+            else if (Array.isArray(value) || ArrayBuffer.isView(value)) {
+                if (value.length === 2) gl.uniform2f(loc, value[0], value[1]);
+                else if (value.length === 3) gl.uniform3f(loc, value[0], value[1], value[2]);
+                else if (value.length === 4) gl.uniform4f(loc, value[0], value[1], value[2], value[3]);
+            }
+        }
+    }
+
+    runStatePass(spec) {
+        const gl = this.gl;
+        const target = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+        const info = this.ensureProgram(spec.key, spec.vertSrc, spec.fragSrc);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.simFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, spec.dstTex, 0);
+        for (let i = 1; i < 4; i++)
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, null, 0);
+        gl.drawBuffers(this.drawBufs[1]);
+        gl.viewport(0, 0, spec.size, spec.size);
+        gl.useProgram(info.prog);
+        gl.bindVertexArray(this.vao);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, spec.srcTex);
+        const stateLoc = this._loc(info, 'uState');
+        if (stateLoc !== null) gl.uniform1i(stateLoc, 0);
+        const simResLoc = this._loc(info, 'uSimRes');
+        if (simResLoc !== null) gl.uniform2f(simResLoc, spec.size, spec.size);
+        this._setGenericUniforms(info, spec.uniforms);
+        gl.disable(gl.BLEND);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+        gl.bindVertexArray(null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+    }
+
+    renderPointsToTexture(spec) {
+        const gl = this.gl;
+        const target = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+        const info = this.ensureProgram(spec.key, spec.vertSrc, spec.fragSrc);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this.nodeFbo);
+        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, spec.targetTex, 0);
+        gl.drawBuffers(this.drawBufs[1]);
+        gl.viewport(0, 0, spec.width, spec.height);
+        gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
+        gl.useProgram(info.prog);
+        gl.bindVertexArray(this.vao);
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, spec.stateTex);
+        const stateLoc = this._loc(info, 'uState');
+        if (stateLoc !== null) gl.uniform1i(stateLoc, 0);
+        this._setGenericUniforms(info, spec.uniforms);
+        if (spec.blend === 'none') gl.disable(gl.BLEND);
+        else {
+            gl.enable(gl.BLEND);
+            if (spec.blend === 'alpha') gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+            else gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+        }
+        gl.drawArrays(gl.POINTS, 0, Math.max(0, spec.count | 0));
+        gl.disable(gl.BLEND);
+        gl.bindVertexArray(null);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+    }
 
   // ── node-graph render entry points ──────────────────────────────────────────
   // render one node's shader into targetTex (its own output texture)

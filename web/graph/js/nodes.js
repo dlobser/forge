@@ -881,6 +881,279 @@ function makeShaderNode(def) {
   LG.registerNodeType(type, Node);
 }
 
+
+// ── Declarative GPU pipeline nodes ─────────────────────────────────────────────
+// A pipeline node owns a ping-pong RGBA32F state texture and renders that state
+// with a declared primitive. The node layer handles UI/lifecycle; the engine stays
+// generic and only provides state-pass and draw-pass operations.
+const pipelineSourceCache = new Map();
+// The manifest uses flat fields because Forge's shader scanner currently preserves
+// top-level values, but does not reliably preserve nested pipeline objects.
+function pipelineFromDef(def) {
+    return {
+        stateSize: def.simSize,
+        stateSizes: def.simSizes,
+        sizeLabel: def.sizeLabel,
+        resetLabel: def.resetLabel,
+        update: {
+            vert: def.updateVert,
+            frag: def.updateFrag,
+        },
+        render: {
+            vert: def.renderVert,
+            frag: def.renderFrag,
+            blend: def.blend,
+            blendControl: def.blendControl,
+        },
+    };
+}
+
+function loadPipelineSources(def) {
+    if (pipelineSourceCache.has(def.key)) return pipelineSourceCache.get(def.key);
+
+    const stages = pipelineFromDef(def);
+    const files = [
+        stages.update && stages.update.vert,
+        stages.update && stages.update.frag,
+        stages.render && stages.render.vert,
+        stages.render && stages.render.frag,
+    ];
+
+    const promise = Promise.all(files.map(async (file) => {
+        if (!file) throw new Error('Incomplete pipeline declaration for ' + def.key);
+        const res = await fetch('/shaders/' + file);
+        if (!res.ok) throw new Error('Could not load pipeline shader: ' + file);
+        return res.text();
+    })).then(([updateVertSrc, updateFragSrc, renderVertSrc, renderFragSrc]) => ({
+        updateVertSrc,
+        updateFragSrc,
+        renderVertSrc,
+        renderFragSrc,
+    }));
+
+    pipelineSourceCache.set(def.key, promise);
+    return promise;
+}
+
+function makePipelineNode(def) {
+    const pipeline = pipelineFromDef(def);
+    const controls = def.controls || [];
+    const controlValue = (params, uniform) => {
+        if (params[uniform] !== undefined) return params[uniform];
+        const control = controls.find((item) => item.uniform === uniform);
+        return control ? control.value : 0;
+    };
+
+    function Node() {
+        this.addOutput('out', IMG);
+        this.properties = {
+            params: {},
+            simSize: pipeline.stateSize || 64,
+        };
+
+        addShaderWidgets(this, def);
+
+        this._pipelineSources = null;
+        this._status = 'loading pipeline shaders…';
+        this._statusColor = '#ffcc66';
+
+        loadPipelineSources(def)
+            .then((sources) => {
+                this._pipelineSources = sources;
+                this._status = null;
+                this._dirty = true;
+                RT.redraw();
+            })
+            .catch((e) => {
+                this._status = 'pipeline shader load failed';
+                this._statusColor = '#ff6666';
+                console.error(e);
+                RT.redraw();
+            });
+
+        this.addWidget('combo', pipeline.sizeLabel || 'state grid', this.properties.simSize, (v) => {
+            this.properties.simSize = +v;
+            this._resetPipeline();
+            RT.requestSave();
+        }, { values: pipeline.stateSizes || [32, 64, 128, 256] });
+
+        this.addWidget('button', pipeline.resetLabel || '↺ reset state', null, () => {
+            this._resetPipeline();
+            RT.redraw();
+        });
+
+        this._def = def;
+        this._size = { width: RT.RENDER_SIZE, height: RT.RENDER_SIZE };
+        this._dirty = true;
+
+        attachThumb(this);
+        sizeWithThumb(this);
+    }
+
+    Node.title = def.name || def.key;
+
+    Node.prototype._stateKey = function () {
+        return 'n' + this.id;
+    };
+
+    Node.prototype._resetPipeline = function () {
+        this._seed = (this._seed || 0) + 1;
+        RT.engine.resetStateBuffer(this._stateKey());
+    };
+
+    Node.prototype.onConfigure = function () {
+        if (this.properties.simSize === undefined)
+            this.properties.simSize = pipeline.stateSize || 64;
+
+        this.properties.params = this.properties.params || {};
+        setWidget(this, pipeline.sizeLabel || 'state grid', this.properties.simSize);
+        syncShaderWidgets(this);
+        this._dirty = true;
+    };
+
+    Node.prototype.evaluate = function () {
+        const sources = this._pipelineSources;
+        if (!sources) return;
+
+        const params = Object.assign({}, this.properties.params);
+        const simSize = Math.max(8, +this.properties.simSize || pipeline.stateSize || 64);
+        const stateKey = this._stateKey();
+
+        this._size = nodeRenderSize(this);
+        ensureOut(this);
+
+        const state = RT.engine.ensureStateBuffer(stateKey, simSize);
+        const resetToken = stateKey + '|' + simSize + '|' + (this._seed || 0);
+
+        const runUpdate = (reset) => {
+            RT.engine.runStatePass({
+                key: def.key + ':update',
+                vertSrc: sources.updateVertSrc,
+                fragSrc: sources.updateFragSrc,
+                srcTex: state.a,
+                dstTex: state.b,
+                size: simSize,
+                uniforms: {
+                    uReset: reset ? 1 : 0,
+                    uDeltaTime: reset ? 0 : Math.min(0.05, Math.max(0, RT.dt || 1 / 60)),
+                    uSpeed: Number(controlValue(params, 'uSpeed')),
+                    uSpread: Number(controlValue(params, 'uSpread')),
+                    uSeed: (this._seed || 0) + (reset ? 0 : state.frame * 0.001),
+                },
+            });
+
+            const texture = state.a;
+            state.a = state.b;
+            state.b = texture;
+        };
+
+        if (state.token !== resetToken) {
+            runUpdate(true);
+            state.token = resetToken;
+            state.frame = 0;
+            this._dirty = true;
+        }
+
+        if (RT.advance) {
+            runUpdate(false);
+            state.frame++;
+        }
+
+        const blendControl = pipeline.render.blendControl;
+        const blendEnabled = blendControl
+            ? controlValue(params, blendControl) !== false
+            : true;
+
+        const pkey = JSON.stringify(params)
+            + '|' + simSize
+            + '|' + this._size.width + 'x' + this._size.height
+            + '|' + (this._seed || 0);
+
+        if (this._dirty || RT.advance || pkey !== this._pkey) {
+            RT.engine.renderPointsToTexture({
+                key: def.key + ':render',
+                vertSrc: sources.renderVertSrc,
+                fragSrc: sources.renderFragSrc,
+                stateTex: state.a,
+                targetTex: this._out.tex,
+                width: this._size.width,
+                height: this._size.height,
+                count: simSize * simSize,
+                blend: blendEnabled ? (pipeline.render.blend || 'additive') : 'alpha',
+                uniforms: {
+                    uSimRes: [simSize, simSize],
+                    uResolution: [this._size.width, this._size.height],
+                    uPointSize: Number(controlValue(params, 'uPointSize')) || 1,
+                    uParticleColor: controlValue(params, 'uParticleColor') || [1, 1, 1],
+                },
+            });
+
+            this._out.version++;
+            this._dirty = false;
+            this._pkey = pkey;
+        }
+
+        this.setOutputData(0, this._out);
+    };
+
+    Node.prototype.onRemoved = function () {
+        RT.engine.deleteStateBuffer(this._stateKey());
+    };
+
+    Node.prototype.onDblClick = function () {
+        if (this._out && this._out.tex) openFull(this);
+    };
+
+    Node.prototype.getExtraMenuOptions = function () {
+        const node = this;
+        const current = this._size || nodeRenderSize(this);
+
+        return [{
+            content: 'Render size: ' + current.width + ' × ' + current.height,
+            has_submenu: true,
+            callback: function (_v, _opts, e, menu) {
+                new LG.ContextMenu([
+                    'default',
+                    '512 × 512',
+                    '1024 × 1024',
+                    '1920 × 1080',
+                    '1080 × 1920',
+                    '2048 × 1024',
+                    '1024 × 2048',
+                    'custom…',
+                ], {
+                    event: e,
+                    parentMenu: menu,
+                    callback: function (val) {
+                        if (val === 'default') {
+                            delete node.properties.renderWidth;
+                            delete node.properties.renderHeight;
+                        } else {
+                            let m = String(val).match(/(\d+)\s*[×x]\s*(\d+)/i);
+                            if (String(val).startsWith('custom'))
+                                m = String(prompt('Render size (width x height):', current.width + 'x' + current.height) || '').match(/(\d+)\s*[×x]\s*(\d+)/i);
+
+                            if (!m || +m[1] < 64 || +m[2] < 64) return;
+                            node.properties.renderWidth = +m[1];
+                            node.properties.renderHeight = +m[2];
+                        }
+
+                        delete node.properties.renderSize;
+                        node._dirty = true;
+                        RT.requestSave();
+                        RT.redraw();
+                    },
+                });
+            },
+        }];
+    };
+
+    const type = (def.category || 'generate') + '/' + def.key;
+    LEGACY['forge/shader/' + def.key] = type;
+    LG.registerNodeType(type, Node);
+}
+
+
 // ── Depth (auto-bakes via ComfyUI on input change) ─────────────────────────────
 function DepthNode() {
   this.addInput('image', IMG); this.addOutput('depth', IMG);
@@ -1160,6 +1433,7 @@ SequenceNode.prototype._render = async function () {
   RT.advance = true;            // force feedback + animated shaders to step
   try {
     RT.engine.resetSim();                       // reseed all feedback sims
+    RT.engine.resetStateBuffer();
     await RT.api.seqClear(RT.project, name);
     for (let i = 0; i < n; i++) {
       RT.time = i / fps;                        // advance time so animated shaders move
@@ -1438,7 +1712,23 @@ export function registerNodes() {
   LG.registerNodeType(T.SAVE, SaveNode);
   LG.registerNodeType(T.SEQUENCE, SequenceNode);
   LG.registerNodeType(T.PASS_THROUGH, PassThroughNode);
-  for (const def of RT.shaderDefs) makeShaderNode(def);
+  for (const def of RT.shaderDefs) {
+      const isParticleSystem =
+          def.particleSystem === true ||
+          def.key === 'gpuParticles' ||
+            (
+                !!def.updateVert &&
+                !!def.updateFrag &&
+                !!def.renderVert &&
+                !!def.renderFrag
+            );
+
+        if (isParticleSystem) {
+            makePipelineNode(def);
+        } else {
+            makeShaderNode(def);
+        }
+  }
   for (const wf of RT.workflows) makeAiNode(wf);
   for (const m of RT.mathDefs) makeMathNode(m);
   registerBuiltins();

@@ -56,6 +56,10 @@ function normalizeDefs(raw) {
     controls: d.def.controls, feedback: d.def.feedback, history: d.def.history,
     animated: d.def.animated, simSize: d.def.simSize, simSizes: d.def.simSizes,
     simBuffers: d.def.simBuffers, simPasses: d.def.simPasses, outputs: d.def.outputs,
+    particleSystem: d.def.particleSystem, updateVert: d.def.updateVert, updateFrag: d.def.updateFrag,
+    renderVert: d.def.renderVert, renderFrag: d.def.renderFrag,
+    blend: d.def.blend, blendControl: d.def.blendControl,
+    sizeLabel: d.def.sizeLabel, resetLabel: d.def.resetLabel,
   }));
 }
 
