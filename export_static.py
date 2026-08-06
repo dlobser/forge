@@ -11,7 +11,8 @@ no ComfyUI, no writable disk.
     python export_static.py --out build --all-images
     python export_static.py --list                 # what can be exported
 
-Then serve the folder at a domain ROOT (Cloudflare Pages, Netlify, a bucket):
+Then drop the folder on any static host — a domain root, or a subpath such as a
+GitHub Pages project site (user.github.io/repo/) or a portfolio's /forge/:
 
     cd dist && python -m http.server 8000
 
@@ -337,6 +338,13 @@ def export(mode: str, project: str, dist: Path, all_images: bool, clean: bool) -
     (dist / "_headers").write_text(
         "/*\n  Cache-Control: no-cache\n", encoding="utf-8")
 
+    # GitHub Pages runs Jekyll over the branch unless this file exists, and Jekyll
+    # drops every path starting with an underscore. That would silently delete
+    # shaders/_fullscreen.vert — the vertex shader every effect without its own
+    # .vert falls back to — and the failure looks like "all the shaders are broken"
+    # rather than a missing file. Harmless on every other host.
+    (dist / ".nojekyll").write_text("", encoding="utf-8")
+
     # 1. front-end
     n_web = copy_tree(ROOT / "web" / "graph", dist / "web" / "graph",
                       ["js/*.js", "vendor/*"])
@@ -427,9 +435,16 @@ def export(mode: str, project: str, dist: Path, all_images: bool, clean: bool) -
                 "index.html  the node editor\n"
                 "play.html   the visitor's own authored UI, from their browser storage\n")
     (dist / "README.txt").write_text(
-        what + "\nServe this folder at the ROOT of a domain (Cloudflare Pages, Netlify,\n"
-        "S3+CloudFront). Asset paths are root-absolute, so a GitHub Pages project\n"
-        "subpath (user.github.io/repo/) will NOT work without a custom domain.\n\n"
+        what + "\nDrop this folder on any static host — Cloudflare Pages, Netlify,\n"
+        "S3+CloudFront, GitHub Pages. It works at a domain root or under a subpath\n"
+        "(user.github.io/repo/, or a portfolio's /forge/): the baked shader and\n"
+        "math-node paths are resolved against the build's own location at runtime,\n"
+        "not against the origin.\n\n"
+        "GitHub Pages: serve it from a branch's / or /docs (dist/ is not a source\n"
+        "folder Pages offers), and keep the .nojekyll file — without it Jekyll\n"
+        "strips shaders/_fullscreen.vert and every shader fails to compile. The\n"
+        "_headers file is a Netlify/Cloudflare thing; Pages ignores it, so expect\n"
+        "its own ~10 min asset cache between a push and a visible change.\n\n"
         "Local check:  python -m http.server 8000\n",
         encoding="utf-8")
 
