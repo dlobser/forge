@@ -178,11 +178,12 @@ export class ShaderEngine {
     return null;
   }
 
-  _bindImages(info, spec) {
+  _bindImages(info, spec, startUnit = 0) {
     const gl = this.gl;
     // an explicit [] means no inputs (a generator); only undefined defaults to color/depth
     const names = Array.isArray(spec.inputs) ? spec.inputs : ['color', 'depth'];
-    names.forEach((name, unit) => {
+    names.forEach((name, index) => {
+      const unit = startUnit + index;
       gl.activeTexture(gl.TEXTURE0 + unit);
       let tex;
       if (spec.inputTextures && spec.inputTextures[name]) tex = spec.inputTextures[name];   // graph: upstream node texture
@@ -199,7 +200,7 @@ export class ShaderEngine {
       const loc = this._loc(info, this._uniformForInput(name));
       if (loc !== null) gl.uniform1i(loc, unit);
     });
-    return names.length;
+    return startUnit + names.length;
   }
 
   _setControls(info, spec) {
@@ -459,17 +460,20 @@ export class ShaderEngine {
   }
 
     // ── generic GPU state buffers ───────────────────────────────────────────────
-    // One RGBA32F texel represents one simulation item. The engine does not assign
-    // meaning to its channels: a particle node can use position.xy and velocity.xy,
-    // while another simulation can store completely different state.
-    ensureStateBuffer(key, size) {
+    // One texel represents one simulation item. A pipeline may declare several
+    // RGBA32F state textures when four channels are not enough. Particle shaders,
+    // for example, can keep motion, lifetime/colour, and spawn metadata separate.
+    ensureStateBuffer(key, size, count = 1) {
         const gl = this.gl;
         if (!this.floatRenderable)
             throw new Error('GPU state buffers need WebGL2 float render targets (EXT_color_buffer_float), unavailable here.');
         size = Math.max(8, size | 0);
+        count = Math.max(1, Math.min(4, count | 0));
         let state = this.stateBuffers.get(key);
-        if (state && state.size === size) return state;
-        if (state) { gl.deleteTexture(state.a); gl.deleteTexture(state.b); }
+        if (state && state.size === size && state.a.length === count) return state;
+        if (state) {
+            for (const tex of state.a.concat(state.b)) gl.deleteTexture(tex);
+        }
         const mk = () => {
             const t = gl.createTexture();
             gl.bindTexture(gl.TEXTURE_2D, t);
@@ -480,7 +484,9 @@ export class ShaderEngine {
             gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
             return t;
         };
-        state = { size, a: mk(), b: mk(), token: null, frame: 0 };
+        const a = [], b = [];
+        for (let i = 0; i < count; i++) { a.push(mk()); b.push(mk()); }
+        state = { size, a, b, token: null, frame: 0 };
         this.stateBuffers.set(key, state);
         return state;
     }
@@ -494,8 +500,7 @@ export class ShaderEngine {
         const state = this.stateBuffers.get(key);
         if (!state) return;
         const gl = this.gl;
-        gl.deleteTexture(state.a);
-        gl.deleteTexture(state.b);
+        for (const tex of state.a.concat(state.b)) gl.deleteTexture(tex);
         this.stateBuffers.delete(key);
     }
 
@@ -518,18 +523,31 @@ export class ShaderEngine {
         const gl = this.gl;
         const target = gl.getParameter(gl.FRAMEBUFFER_BINDING);
         const info = this.ensureProgram(spec.key, spec.vertSrc, spec.fragSrc);
+        const src = Array.isArray(spec.srcTextures) ? spec.srcTextures : [spec.srcTex];
+        const dst = Array.isArray(spec.dstTextures) ? spec.dstTextures : [spec.dstTex];
+        const count = Math.max(1, Math.min(4, dst.length));
+
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.simFbo);
-        gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, spec.dstTex, 0);
-        for (let i = 1; i < 4; i++)
-            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, null, 0);
-        gl.drawBuffers(this.drawBufs[1]);
+        for (let i = 0; i < 4; i++)
+            gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0 + i, gl.TEXTURE_2D, i < count ? dst[i] : null, 0);
+        gl.drawBuffers(this.drawBufs[count]);
         gl.viewport(0, 0, spec.size, spec.size);
         gl.useProgram(info.prog);
         gl.bindVertexArray(this.vao);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, spec.srcTex);
-        const stateLoc = this._loc(info, 'uState');
-        if (stateLoc !== null) gl.uniform1i(stateLoc, 0);
+
+        for (let i = 0; i < src.length; i++) {
+            gl.activeTexture(gl.TEXTURE0 + i);
+            gl.bindTexture(gl.TEXTURE_2D, src[i]);
+            const stateLoc = this._loc(info, this._stateName(i, src.length));
+            if (stateLoc !== null) gl.uniform1i(stateLoc, i);
+        }
+
+        this._bindImages(info, {
+            inputs: spec.inputs || [],
+            inputTextures: spec.inputTextures,
+            inputDefaults: spec.inputDefaults,
+        }, src.length);
+
         const simResLoc = this._loc(info, 'uSimRes');
         if (simResLoc !== null) gl.uniform2f(simResLoc, spec.size, spec.size);
         this._setGenericUniforms(info, spec.uniforms);
@@ -543,6 +561,8 @@ export class ShaderEngine {
         const gl = this.gl;
         const target = gl.getParameter(gl.FRAMEBUFFER_BINDING);
         const info = this.ensureProgram(spec.key, spec.vertSrc, spec.fragSrc);
+        const stateTextures = Array.isArray(spec.stateTextures) ? spec.stateTextures : [spec.stateTex];
+
         gl.bindFramebuffer(gl.FRAMEBUFFER, this.nodeFbo);
         gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, spec.targetTex, 0);
         gl.drawBuffers(this.drawBufs[1]);
@@ -550,10 +570,20 @@ export class ShaderEngine {
         gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
         gl.useProgram(info.prog);
         gl.bindVertexArray(this.vao);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, spec.stateTex);
-        const stateLoc = this._loc(info, 'uState');
-        if (stateLoc !== null) gl.uniform1i(stateLoc, 0);
+
+        for (let i = 0; i < stateTextures.length; i++) {
+            gl.activeTexture(gl.TEXTURE0 + i);
+            gl.bindTexture(gl.TEXTURE_2D, stateTextures[i]);
+            const stateLoc = this._loc(info, this._stateName(i, stateTextures.length));
+            if (stateLoc !== null) gl.uniform1i(stateLoc, i);
+        }
+
+        this._bindImages(info, {
+            inputs: spec.inputs || [],
+            inputTextures: spec.inputTextures,
+            inputDefaults: spec.inputDefaults,
+        }, stateTextures.length);
+
         this._setGenericUniforms(info, spec.uniforms);
         if (spec.blend === 'none') gl.disable(gl.BLEND);
         else {

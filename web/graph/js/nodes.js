@@ -893,6 +893,7 @@ function pipelineFromDef(def) {
     return {
         stateSize: def.simSize,
         stateSizes: def.simSizes,
+        stateBuffers: def.stateBuffers || 1,
         sizeLabel: def.sizeLabel,
         resetLabel: def.resetLabel,
         update: {
@@ -938,13 +939,38 @@ function loadPipelineSources(def) {
 function makePipelineNode(def) {
     const pipeline = pipelineFromDef(def);
     const controls = def.controls || [];
+    const inputs = Array.isArray(def.inputs) ? def.inputs : [];
+    const labels = def.inputLabels || {};
     const controlValue = (params, uniform) => {
         if (params[uniform] !== undefined) return params[uniform];
         const control = controls.find((item) => item.uniform === uniform);
         return control ? control.value : 0;
     };
+    const colorArray = (value, fallback = [1, 1, 1]) => {
+        if (Array.isArray(value) || ArrayBuffer.isView(value)) return value;
+        if (typeof value === 'string') {
+            const hex = value.trim().replace(/^#/, '');
+            if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+                return [
+                    parseInt(hex.slice(0, 2), 16) / 255,
+                    parseInt(hex.slice(2, 4), 16) / 255,
+                    parseInt(hex.slice(4, 6), 16) / 255,
+                ];
+            }
+        }
+        return fallback;
+    };
+    const controlUniforms = (params) => {
+        const out = {};
+        for (const control of controls) {
+            const value = controlValue(params, control.uniform);
+            out[control.uniform] = control.type === 'color' ? colorArray(value, control.value) : value;
+        }
+        return out;
+    };
 
     function Node() {
+        for (const name of inputs) this.addInput(labels[name] || name, IMG);
         this.addOutput('out', IMG);
         this.properties = {
             params: {},
@@ -1016,35 +1042,50 @@ function makePipelineNode(def) {
         if (!sources) return;
 
         const params = Object.assign({}, this.properties.params);
+        const inTex = {};
+        const versions = [];
+        inputs.forEach((name, i) => {
+            const h = this.getInputData(i);
+            if (h && h.tex) {
+                inTex[name] = h.tex;
+                versions.push(h.version | 0);
+            } else {
+                versions.push(-1);
+            }
+        });
+
         const simSize = Math.max(8, +this.properties.simSize || pipeline.stateSize || 64);
         const stateKey = this._stateKey();
+        const firstInput = inputs.map((_name, i) => this.getInputData(i)).find((h) => h && h.tex);
 
-        this._size = nodeRenderSize(this);
+        this._size = nodeRenderSize(this, firstInput);
         ensureOut(this);
 
-        const state = RT.engine.ensureStateBuffer(stateKey, simSize);
+        const state = RT.engine.ensureStateBuffer(stateKey, simSize, pipeline.stateBuffers || 1);
         const resetToken = stateKey + '|' + simSize + '|' + (this._seed || 0);
 
         const runUpdate = (reset) => {
+            const uniforms = controlUniforms(params);
+            uniforms.uReset = reset ? 1 : 0;
+            uniforms.uDeltaTime = reset ? 0 : Math.min(0.05, Math.max(0, RT.dt || 1 / 60));
+            uniforms.uSeed = (this._seed || 0) + (reset ? 0 : state.frame * 0.001);
+
             RT.engine.runStatePass({
                 key: def.key + ':update',
                 vertSrc: sources.updateVertSrc,
                 fragSrc: sources.updateFragSrc,
-                srcTex: state.a,
-                dstTex: state.b,
+                srcTextures: state.a,
+                dstTextures: state.b,
                 size: simSize,
-                uniforms: {
-                    uReset: reset ? 1 : 0,
-                    uDeltaTime: reset ? 0 : Math.min(0.05, Math.max(0, RT.dt || 1 / 60)),
-                    uSpeed: Number(controlValue(params, 'uSpeed')),
-                    uSpread: Number(controlValue(params, 'uSpread')),
-                    uSeed: (this._seed || 0) + (reset ? 0 : state.frame * 0.001),
-                },
+                inputs,
+                inputTextures: inTex,
+                inputDefaults: def.inputDefaults,
+                uniforms,
             });
 
-            const texture = state.a;
+            const textures = state.a;
             state.a = state.b;
-            state.b = texture;
+            state.b = textures;
         };
 
         if (state.token !== resetToken) {
@@ -1065,27 +1106,27 @@ function makePipelineNode(def) {
             : true;
 
         const pkey = JSON.stringify(params)
+            + '|' + versions.join(',')
             + '|' + simSize
             + '|' + this._size.width + 'x' + this._size.height
             + '|' + (this._seed || 0);
 
         if (this._dirty || RT.advance || pkey !== this._pkey) {
+            const renderUniforms = controlUniforms(params);
+            renderUniforms.uSimRes = [simSize, simSize];
+            renderUniforms.uResolution = [this._size.width, this._size.height];
+
             RT.engine.renderPointsToTexture({
                 key: def.key + ':render',
                 vertSrc: sources.renderVertSrc,
                 fragSrc: sources.renderFragSrc,
-                stateTex: state.a,
+                stateTextures: state.a,
                 targetTex: this._out.tex,
                 width: this._size.width,
                 height: this._size.height,
                 count: simSize * simSize,
                 blend: blendEnabled ? (pipeline.render.blend || 'additive') : 'alpha',
-                uniforms: {
-                    uSimRes: [simSize, simSize],
-                    uResolution: [this._size.width, this._size.height],
-                    uPointSize: Number(controlValue(params, 'uPointSize')) || 1,
-                    uParticleColor: controlValue(params, 'uParticleColor') || [1, 1, 1],
-                },
+                uniforms: renderUniforms,
             });
 
             this._out.version++;
