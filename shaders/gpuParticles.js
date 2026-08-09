@@ -15,7 +15,7 @@ export default {
         force: "gray",
     },
 
-    particleSystem: true,
+    pipeline: true,
 
     simSize: 64,
     simSizes: [32, 64, 128, 256],
@@ -28,8 +28,7 @@ export default {
     updateFrag: "gpuParticlesUpdate.frag",
     renderVert: "gpuParticlesRender.vert",
     renderFrag: "gpuParticlesRender.frag",
-
-    primitive: "points",
+    
     blend: "additive",
     blendControl: "uAdditive",
 

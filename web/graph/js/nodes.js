@@ -1754,17 +1754,7 @@ export function registerNodes() {
   LG.registerNodeType(T.SEQUENCE, SequenceNode);
   LG.registerNodeType(T.PASS_THROUGH, PassThroughNode);
   for (const def of RT.shaderDefs) {
-      const isParticleSystem =
-          def.particleSystem === true ||
-          def.key === 'gpuParticles' ||
-            (
-                !!def.updateVert &&
-                !!def.updateFrag &&
-                !!def.renderVert &&
-                !!def.renderFrag
-            );
-
-        if (isParticleSystem) {
+        if (def.pipeline) {
             makePipelineNode(def);
         } else {
             makeShaderNode(def);
