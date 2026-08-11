@@ -1,6 +1,6 @@
 export default {
     name: "Line Integral Convolution",
-    category: "utility",
+    category: "effect",
     inputs: ["color"],
     inputLabels: {
         color: "Field (RG → XY)"
