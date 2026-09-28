@@ -91,6 +91,12 @@
       "vert": null
     },
     {
+      "key": "gpuParticles",
+      "js": "/shaders/gpuParticles.js",
+      "frag": null,
+      "vert": null
+    },
+    {
       "key": "gradient",
       "js": "/shaders/gradient.js",
       "frag": "/shaders/gradient.frag",
@@ -130,6 +136,18 @@
       "key": "kuramoto",
       "js": "/shaders/kuramoto.js",
       "frag": "/shaders/kuramoto.frag",
+      "vert": null
+    },
+    {
+      "key": "lineIntegralConvolution",
+      "js": "/shaders/lineIntegralConvolution.js",
+      "frag": "/shaders/lineIntegralConvolution.frag",
+      "vert": null
+    },
+    {
+      "key": "lineIntegralConvolution2",
+      "js": "/shaders/lineIntegralConvolution2.js",
+      "frag": "/shaders/lineIntegralConvolution2.frag",
       "vert": null
     },
     {
@@ -178,6 +196,12 @@
       "key": "splitChannels",
       "js": "/shaders/splitChannels.js",
       "frag": "/shaders/splitChannels.frag",
+      "vert": null
+    },
+    {
+      "key": "vectorFieldVisualizer",
+      "js": "/shaders/vectorFieldVisualizer.js",
+      "frag": "/shaders/vectorFieldVisualizer.frag",
       "vert": null
     },
     {

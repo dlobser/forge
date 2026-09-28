@@ -7,8 +7,16 @@ and video nodes are disabled - they need ComfyUI/ffmpeg locally.
 index.html  the node editor
 play.html   the visitor's own authored UI, from their browser storage
 
-Serve this folder at the ROOT of a domain (Cloudflare Pages, Netlify,
-S3+CloudFront). Asset paths are root-absolute, so a GitHub Pages project
-subpath (user.github.io/repo/) will NOT work without a custom domain.
+Drop this folder on any static host — Cloudflare Pages, Netlify,
+S3+CloudFront, GitHub Pages. It works at a domain root or under a subpath
+(user.github.io/repo/, or a portfolio's /forge/): the baked shader and
+math-node paths are resolved against the build's own location at runtime,
+not against the origin.
+
+GitHub Pages: serve it from a branch's / or /docs (dist/ is not a source
+folder Pages offers), and keep the .nojekyll file — without it Jekyll
+strips shaders/_fullscreen.vert and every shader fails to compile. The
+_headers file is a Netlify/Cloudflare thing; Pages ignores it, so expect
+its own ~10 min asset cache between a push and a visible change.
 
 Local check:  python -m http.server 8000
