@@ -1,0 +1,43 @@
+# Publish the static Forge editor to GitHub Pages on every push to main.
+#
+# Builds it fresh with export_static.py (editor mode needs only the Python standard
+# library and tracked files — no projects/, no pip install), so the site always
+# matches the code and dist/ doesn't have to be regenerated and committed by hand.
+# One-time setup: repo Settings ▸ Pages ▸ Build and deployment ▸ Source: GitHub Actions.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:          # the "Run workflow" button in the Actions tab
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# one deploy at a time; a newer push supersedes one still waiting
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build the static editor
+        run: python3 export_static.py --out _site
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

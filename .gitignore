@@ -48,3 +48,5 @@ web/build/
 # uncomment the lines below to ignore them and track templates instead (e.g., start.bat.example)
 # forge.bat
 # start.bat
+# local GitHub Pages test builds (CI builds its own: .github/workflows/pages.yml)
+_site/

@@ -187,6 +187,37 @@ Exposure overrides (hide / relabel / reorder params) are stored in a sidecar
 is active (or "no depth"). The "⚙ gen" button on a shader's depth slot generates a
 depth map from its color image and saves it to the gallery.
 
+## Local AI vs Cloud AI
+
+The graph's AI nodes come in two categories:
+
+- **local ai** — runs through ComfyUI on this machine: every workflow in
+  `Workflows/` (`AI: …`) and **Depth (ComfyUI)**, the DepthAnything bake above.
+- **cloud ai** — runs on **ChatGPT** (OpenAI `gpt-image-2` by default) or **Gemini**
+  (Nano Banana, `gemini-nano-banana-2.1` by default), whichever ⚙ Settings ▸
+  *Cloud AI* selects. **Depth (Cloud AI)** sends its input with a depth prompt and
+  gets a white-near / black-far map back, resized to the input. **Generate (Cloud
+  AI)** turns a prompt into an image; connect a picture to its `image` input and it is
+  sent along with the prompt (an edit). Generate never runs on its own — only on
+  **✦ Generate** — since every call is billed.
+
+The Cloud AI dialog holds a key, model and quality/resolution per provider, plus a
+radio for which one the nodes use. It all runs in the browser (`cloudai.js`, with
+`openai.js` / `gemini.js` as the two adapters): keys live in that browser's
+localStorage and go only to that provider — never to the Forge server, graph.json or a
+share link. So cloud nodes work on the static/published build too, where a graph with
+one gets a **✦ AI** button for visitors to enter their own key. While a cloud call is
+in flight the node shows a spinner and clock, and the page shows a "ChatGPT is making
+an image… 0:23" pill — calls take ten seconds to a couple of minutes.
+
+Graphs saved before the split name their nodes `ai/depth` and `ai/<workflow>`; they
+load as the local versions.
+
+A Depth node records a 16×16 signature of the input its map was made from
+(`properties.srcSig`), so reopening a graph or loading the published page reuses the
+saved map instead of re-baking (and re-billing); only a different input re-bakes, or
+the node's **↻ regenerate** button.
+
 ## ffmpeg / video
 
 Animated shaders render a frame sequence to `projects/<Name>/sequences/<effect>/`,

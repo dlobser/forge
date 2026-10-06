@@ -13,6 +13,7 @@ import {
 } from './filemenu.js';
 import { askText } from './ui.js';
 import { openHelp } from './help.js';
+import { openCloudDialog, cloudSummary, onCloudChange, mountCloudIndicator } from './cloudai.js';
 
 const LG = window.LiteGraph;
 const $ = (id) => document.getElementById(id);
@@ -257,6 +258,12 @@ function resizeCanvas(canvas) {
   const rsSel = $('defaultRenderSize');
   rsSel.value = String(RT.RENDER_SIZE);
   rsSel.onchange = () => { RT.RENDER_SIZE = +rsSel.value || 512; localStorage.setItem('forge.graph.renderSize', String(RT.RENDER_SIZE)); toast('Default render size: ' + RT.RENDER_SIZE); };
+  // Cloud AI nodes: provider (ChatGPT / Gemini) + keys live in this browser only
+  const syncCloud = () => { $('cloudHint').textContent = cloudSummary(); };
+  $('cloudBtn').onclick = () => openCloudDialog();
+  onCloudChange(() => { syncCloud(); toast('Cloud AI: ' + cloudSummary(), 'good'); });
+  syncCloud();
+  mountCloudIndicator({ where: 'top' });
 
   $('helpBtn').onclick = () => openHelp();
 

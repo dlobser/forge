@@ -18,9 +18,12 @@ GitHub Pages project site (user.github.io/repo/) or a portfolio's /forge/:
 
 What survives the export: every shader and math node (pure client-side WebGL2),
 the whole graph, the authored end-user UI, and the images it references. What does
-not: saving (the page is read-only by design), image import, depth generation, and
-AI Generate — all of those need the live backend, so their buttons no-op. AI nodes
-still load and show their last cached output so the graph keeps its shape.
+not: saving (the page is read-only by design), image import, ComfyUI depth generation,
+and the Local AI (ComfyUI) nodes — all of those need the live backend, so their
+buttons no-op. Local AI nodes still load and show their last cached output so the
+graph keeps its shape. Cloud AI nodes (Depth, Generate) keep working: they call
+ChatGPT or Gemini from the browser with the visitor's own key, entered via the page's
+✦ AI button; a map or image the author already made is shown without one.
 """
 
 from __future__ import annotations
@@ -440,7 +443,9 @@ def export(mode: str, project: str, dist: Path, all_images: bool, clean: bool) -
         "(user.github.io/repo/, or a portfolio's /forge/): the baked shader and\n"
         "math-node paths are resolved against the build's own location at runtime,\n"
         "not against the origin.\n\n"
-        "GitHub Pages: serve it from a branch's / or /docs (dist/ is not a source\n"
+        "GitHub Pages: the repo's .github/workflows/pages.yml builds and deploys\n"
+        "this on every push to main (Settings > Pages > Source: GitHub Actions).\n"
+        "Serving a branch instead? Use its / or /docs (dist/ is not a source\n"
         "folder Pages offers), and keep the .nojekyll file — without it Jekyll\n"
         "strips shaders/_fullscreen.vert and every shader fails to compile. The\n"
         "_headers file is a Netlify/Cloudflare thing; Pages ignores it, so expect\n"

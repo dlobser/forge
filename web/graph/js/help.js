@@ -20,7 +20,7 @@ const SECTIONS = [
   {
     h: 'Node categories',
     rows: [
-      ['input', 'Where pictures and signals come from: Source (gallery), Import, URL Image, Webcam, Audio Reactive.'],
+      ['input', 'Where pictures and signals come from: Source (gallery), Import, URL Image, Webcam, Audio Reactive, Drawing (draw strokes in a pane; still or animated draw-on).'],
       ['image', 'Framing and tone: Crop / Scale, Blend, Key, Remap, Anti-alias.'],
       ['effect', 'Per-pixel looks: Blur, Distort, Edge Detect, Kaleidoscope, Mosaic…'],
       ['generate', 'Sources made from nothing: Noise, Gradient, SDF, Raymarch, Sine Wave.'],
@@ -29,7 +29,8 @@ const SECTIONS = [
       ['depth', 'Effects driven by a depth map.'],
       ['control / math', 'Sliders, toggles and arithmetic that drive other nodes’ pins.'],
       ['output', 'Viewer, Viewer Window, Save, Sequence → Video.'],
-      ['ai', 'ComfyUI workflows and depth generation — these need the Python server.'],
+      ['local ai', 'Runs on your machine through ComfyUI (needs the Python server): your workflows, and Depth.'],
+      ['cloud ai', 'Runs on ChatGPT or Gemini with your own API key: Depth, and Generate (a prompt → an image; connect a picture and it goes along with the prompt).'],
     ],
   },
   {
@@ -45,7 +46,8 @@ const SECTIONS = [
     h: 'What needs the Python server',
     rows: [
       ['Nothing visual', 'Every shader, the whole node graph, the authored UI and sharing are pure browser WebGL2. A static copy is fully interactive on its own.'],
-      ['ComfyUI', 'AI nodes and depth-map generation talk to ComfyUI on 127.0.0.1:8188. Only reachable from the machine running it.'],
+      ['ComfyUI', 'Local AI nodes talk to ComfyUI on 127.0.0.1:8188. Only reachable from the machine running it.'],
+      ['Cloud AI', 'Not these: ⚙ Settings ▸ Cloud AI picks ChatGPT or Gemini (Nano Banana) and takes your API key. They run from the browser, so they work on a published page too (visitors get a ✦ AI button for their own key).'],
       ['ffmpeg', 'Sequence → Video writes frames to disk and encodes them. Browsers can’t do either.'],
       ['To get those', 'Download the project, run start.bat (or python -m forge_server.server), open 127.0.0.1:8191, then load your graph or share link there.'],
     ],

@@ -9,31 +9,44 @@ import { ShaderEngine } from './engine.js';
 // is mounted, so it works under any subfolder
 import { api } from '../../js/api.js';
 import { RT } from './runtime.js';
-import { registerNodes } from './nodes.js';
+import { registerNodes, isCloudAI } from './nodes.js';
 import { loadShaderDefs, normalizeDefs, loadMathDefs, evalOnce } from './boot.js';
 import { buildEndUserUI } from './endui.js';
 import { decodeGraph, readHash } from './share.js';
+import { toast } from './ui.js';
+import { cloud, openCloudDialog, onCloudChange, mountCloudIndicator } from './cloudai.js';
 
 const LG = window.LiteGraph;
 const $ = (id) => document.getElementById(id);
 
-// A floating "Edit" button that carries the shared graph into the editor. Shown for
-// shared links unless the creator hid it (&e=0). Harmless in the desktop app, where
-// there is no share hash and this is never called.
-function addEditButton(payload) {
+// An "Edit" link that carries the shared graph into the editor. Shown for shared
+// links unless the creator hid it (&e=0). It sits in the viewer's action row beside
+// ⬇ / ⤢ (see buildEndUserUI) — never floating over them.
+function editButton(payload) {
   const a = document.createElement('a');
+  a.className = 'eu-iconbtn eu-textbtn';
   a.textContent = '✎ Edit';
   a.title = 'Open this in the Forge editor and tinker';
   const url = new URL('index.html', location.href);
   url.hash = 'g=' + payload;
   a.href = url.toString();
-  a.style.cssText = 'position:fixed;top:14px;right:14px;z-index:100;'
-    + 'background:#15181d;color:#e6e8ea;border:1px solid #262b33;border-radius:8px;'
-    + 'padding:8px 14px;font:13px -apple-system,Segoe UI,sans-serif;text-decoration:none;'
-    + 'box-shadow:0 4px 14px #0007;cursor:pointer;';
-  a.onmouseenter = () => { a.style.borderColor = '#5b8cff'; };
-  a.onmouseleave = () => { a.style.borderColor = '#262b33'; };
-  document.body.appendChild(a);
+  return a;
+}
+
+// Where a visitor picks ChatGPT or Gemini and enters their own key, so the page's
+// Cloud AI nodes (Depth, Generate) can run. Only offered when the graph has one.
+function aiButton() {
+  const b = document.createElement('button');
+  b.className = 'eu-iconbtn eu-textbtn';
+  b.textContent = '✦ AI';
+  const sync = () => {
+    b.classList.toggle('on', cloud.ready);
+    b.title = cloud.ready ? 'Cloud AI: ' + cloud.name + ' (' + cloud.model + ')'
+      : 'Cloud AI — pick ChatGPT or Gemini and add your API key';
+  };
+  b.onclick = () => openCloudDialog();
+  onCloudChange(sync); sync();
+  return b;
 }
 
 (async function boot() {
@@ -42,7 +55,9 @@ function addEditButton(payload) {
   // runtime wiring
   RT.engine = new ShaderEngine($('glcanvas'));
   RT.api = api;
-  RT.toast = () => {};
+  // Errors only: they're the one thing a visitor needs to see (a bad API key, say);
+  // the editor's "Saved" / "Imported" chatter means nothing on a published page.
+  RT.toast = (msg, kind) => { if (kind === 'bad') toast(msg, kind); };
   RT.requestSave = () => {};                 // published page never writes graph.json
   RT.refreshGallery = async () => { try { RT.gallery = (await api.gallery(RT.project)).images; } catch (e) { RT.gallery = []; } };
   RT.evalOnce = () => evalOnce();
@@ -75,13 +90,15 @@ function addEditButton(payload) {
   }
   if (data && data.nodes && data.nodes.length) { try { RT.graph.configure(data); } catch (e) { console.error('graph configure failed', e); } }
 
-  // the creator can hide Edit per-link with &e=0
-  if (hash.g && hash.e !== '0') addEditButton(hash.g);
+  // buttons for the viewer's action row; the creator can hide Edit per-link with &e=0
+  const actions = [];
+  if ((RT.graph._nodes || []).some(isCloudAI)) { actions.push(aiButton()); mountCloudIndicator({ where: 'bottom' }); }
+  if (hash.g && hash.e !== '0') actions.push(editButton(hash.g));
 
   // build the published UI from the author's config
   const cfg = (RT.graph.extra && RT.graph.extra.endUser) || { title: '', controls: [], previews: [] };
   document.title = cfg.title || ('Forge — ' + project);
-  const drawPreviews = buildEndUserUI($('app'), cfg, RT.graph);
+  const drawPreviews = buildEndUserUI($('app'), cfg, RT.graph, { actions });
   const bootEl = $('boot'); if (bootEl) bootEl.hidden = true;
 
   RT.checkComfy();
