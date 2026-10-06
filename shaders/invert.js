@@ -4,6 +4,7 @@ export default {
   category: "image",
   animated: false,
   inputs: ["color"],
+  inputLabels: { color: "image" },
   controls: [
     { uniform: "uMix", label: "Mix", type: "range", min: 0, max: 1, step: 0.01, value: 1 },
     { uniform: "uMode", label: "Mode", type: "select", value: 0, options: [

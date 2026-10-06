@@ -726,6 +726,16 @@ CropScaleNode.prototype.onDblClick = function () { if (this._out && this._out.te
 // Any numeric control can trade its slider for an input pin, so a math node or a
 // slider elsewhere can drive it: right-click ▸ Input Modes. The choice lives in
 // properties.pinModes; the pin itself is saved with the graph like any input.
+// Pin names come from the manifest, not the saved graph. Litegraph restores the
+// slots a graph was saved with, so without this a renamed pin (Blend's color/depth
+// becoming A/B) would keep its old name in every existing graph and share link.
+function relabelInputs(node, inputs, labels) {
+  inputs.forEach((name, i) => {
+    const s = node.inputs && node.inputs[i];
+    if (s && s.type === IMG) s.name = labels[name] || name;
+  });
+}
+
 const pinnableControls = (def) => (def.controls || []).filter((c) => c.type === 'range' || c.type === 'number' || c.type === 'bool');
 
 // after a load: drop the slider of each pinned control and tag its restored pin
@@ -830,6 +840,7 @@ function makeShaderNode(def) {
   Node.prototype.onConfigure = function () {
     this._dirty = true;
     syncShaderWidgets(this);
+    relabelInputs(this, inputs, labels);
     restorePins(this, pinnable);
   };
 
@@ -1090,6 +1101,7 @@ function makePipelineNode(def) {
         this.properties.params = this.properties.params || {};
         setWidget(this, pipeline.sizeLabel || 'state grid', this.properties.simSize);
         syncShaderWidgets(this);
+        relabelInputs(this, inputs, labels);
         restorePins(this, pinnable);
         this._dirty = true;
     };
@@ -1745,7 +1757,11 @@ SaveNode.prototype.onConfigure = function () { setWidget(this, 'name', this.prop
 // `length` = 'drawing clip' takes the frame count from the Drawing nodes in the graph
 // (the longest clip × fps), so an export is exactly one loop of the drawing.
 // `export` picks what's kept: the PNG frames, the encoded mp4, or both.
-const SEQ_DEFAULTS = { name: 'graph_seq', fps: 24, frames: 48, length: 'frames', export: 'frames + video' };
+// `start` = 'where it is' records from the graph's current state and time — the
+// frame on screen is frame 0 — while 'reset first' reseeds every simulation, trail,
+// particle system and drawing clip and starts the clock at 0.
+const SEQ_START = ['where it is', 'reset first'];
+const SEQ_DEFAULTS = { name: 'graph_seq', fps: 24, frames: 48, length: 'frames', start: SEQ_START[0], export: 'frames + video' };
 function SequenceNode() {
   this.addInput('image', IMG);
   this.properties = Object.assign({}, SEQ_DEFAULTS);
@@ -1753,6 +1769,7 @@ function SequenceNode() {
   this.addWidget('number', 'fps', this.properties.fps, (v) => { this.properties.fps = Math.round(v); RT.requestSave(); }, { min: 1, max: 60, step: 1 });
   this.addWidget('combo', 'length', this.properties.length, (v) => { this.properties.length = v; RT.requestSave(); }, { values: ['frames', 'drawing clip'] });
   this.addWidget('number', 'frames', this.properties.frames, (v) => { this.properties.frames = Math.round(v); RT.requestSave(); }, { min: 1, max: 3600, step: 1 });
+  this.addWidget('combo', 'start', this.properties.start, (v) => { this.properties.start = v; RT.requestSave(); }, { values: SEQ_START });
   this.addWidget('combo', 'export', this.properties.export, (v) => { this.properties.export = v; RT.requestSave(); }, { values: ['frames', 'video', 'frames + video'] });
   this.addWidget('button', '● Render', null, () => this._render());
   this.addWidget('button', 'Make video from frames', null, () => this._video());
@@ -1772,19 +1789,26 @@ SequenceNode.prototype._render = async function () {
   if (!probe || !probe.tex) return RT.toast('Connect an image', 'bad');
   const n = this._frameCount(), name = this.properties.name;
   const fps = this.properties.fps || 24;
+  const fresh = this.properties.start === 'reset first';
   const savedTime = RT.time;
+  const t0 = fresh ? 0 : RT.time;
   RT.capturing = true;          // the rAF loop yields; we own time + eval here
-  RT.advance = true;            // force feedback + animated shaders to step
   try {
-    RT.engine.resetSim();                       // reseed all feedback sims
-    RT.engine.resetStateBuffer();
-    RT.engine.resetHistory();                   // and trails, so a drawing's feedback starts clean
-    for (const node of RT.graph._nodes || []) if (node.resetClip) node.resetClip();
+    if (fresh) {
+      RT.engine.resetSim();                     // reseed all feedback sims
+      RT.engine.resetStateBuffer();             // and particle systems
+      RT.engine.resetHistory();                 // and trails, so a drawing's feedback starts clean
+      for (const node of RT.graph._nodes || []) if (node.resetClip) node.resetClip();
+    }
     await RT.api.seqClear(RT.project, name);
     for (let i = 0; i < n; i++) {
-      RT.time = i / fps;                        // advance time so animated shaders move
+      RT.time = t0 + i / fps;                   // advance time so animated shaders move
       RT.dt = 1 / fps;
-      RT.evalOnce();                            // re-render every node at this time (one feedback step)
+      // Picking up where it is, frame 0 is the frame already on screen: re-render it
+      // without stepping anything. Every later frame steps sims / particles / clips
+      // once — and so does every frame of a fresh start.
+      RT.advance = fresh || i > 0;
+      RT.evalOnce();                            // re-render every node at this time
       const h = this.getInputData(0);
       const s = imageSize(h); const blob = await RT.engine.captureTexture(h.tex, s.width, s.height);
       await RT.api.seqFrame(RT.project, name, i, blob);
@@ -1803,7 +1827,11 @@ SequenceNode.prototype._render = async function () {
     }
     RT.redraw();
   } catch (e) { RT.toast('Sequence failed: ' + e.message, 'bad'); }
-  finally { RT.capturing = false; RT.time = savedTime; }
+  finally {
+    RT.capturing = false;
+    // carry on from the last recorded frame, so the live graph doesn't jump back
+    RT.time = fresh ? savedTime : t0 + (n - 1) / fps;
+  }
 };
 SequenceNode.prototype._video = async function () {
   try {
@@ -1816,7 +1844,7 @@ SequenceNode.prototype._video = async function () {
 SequenceNode.prototype.evaluate = function () {};
 SequenceNode.prototype.onConfigure = function () {
   for (const k in SEQ_DEFAULTS) if (this.properties[k] === undefined) this.properties[k] = SEQ_DEFAULTS[k];
-  for (const k of ['name', 'fps', 'length', 'frames', 'export']) setWidget(this, k, this.properties[k]);
+  for (const k of ['name', 'fps', 'length', 'frames', 'start', 'export']) setWidget(this, k, this.properties[k]);
 };
 // the node face shows progress / the result
 SequenceNode.prototype.onDrawForeground = function (ctx) {

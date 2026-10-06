@@ -5,7 +5,7 @@ export default {
   animated: false,
   inputs: ["color", "depth"],
   // the 2nd input is a mask (smoothstep'd luma), not literally depth — label it so
-  inputLabels: { color: "Color", depth: "Mask" },
+  inputLabels: { color: "image", depth: "mask" },
   controls: [
     { uniform: "uHue",        label: "Hue Offset",  type: "range", min: -0.5, max: 0.5, step: 0.001, value: 0 },
     { uniform: "uSat",        label: "Saturation",  type: "range", min: 0, max: 2, step: 0.01, value: 1 },

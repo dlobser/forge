@@ -3,7 +3,7 @@ export default {
   name: "Key",
   category: "image",
   inputs: ["color", "bg"],
-  inputLabels: { color: "Color", bg: "Background" },
+  inputLabels: { color: "image", bg: "background" },
   controls: [
     { uniform: "uMode",        label: "Mode",          type: "select", value: 0, options: [
       { label: "Chroma (RGB)",     value: 0 },

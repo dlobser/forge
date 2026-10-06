@@ -7,6 +7,7 @@ export default {
   category: "generate",
   animated: true,
   inputs: ["color"],
+  inputLabels: { color: "image" },
   controls: [
     { uniform: "uFreq",  label: "Frequency", type: "range",  min: 0, max: 40, step: 0.1,  value: 6 },
     { uniform: "uSpeed", label: "Speed",     type: "range",  min: -8, max: 8, step: 0.05, value: 1 },

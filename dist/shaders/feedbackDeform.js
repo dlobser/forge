@@ -20,6 +20,7 @@ export default {
   category: "feedback",
   animated: true,
   inputs: ["color", "depth"],
+  inputLabels: { color: "image", depth: "field" },
   controls: [
     { uniform: "uStrength",     label: "Step Strength",   type: "range", min: 0, max: 0.06, step: 0.001, value: 0.02 },
     { uniform: "uIterations",   label: "Iterations",      type: "range", min: 1, max: 48,   step: 1,     value: 16 },

@@ -21,7 +21,7 @@ const SECTIONS = [
     h: 'Node categories',
     rows: [
       ['input', 'Where pictures and signals come from: Source (gallery), Import, URL Image, Webcam, Audio Reactive, Drawing (draw strokes in a pane; still or animated draw-on).'],
-      ['image', 'Framing and tone: Crop / Scale, Blend, Key, Remap, Anti-alias.'],
+      ['image', 'Framing and tone: Crop / Scale, Blend, Key, Remap, Premultiply, Anti-alias.'],
       ['effect', 'Per-pixel looks: Blur, Distort, Edge Detect, Kaleidoscope, Mosaic…'],
       ['generate', 'Sources made from nothing: Noise, Gradient, SDF, Raymarch, Sine Wave.'],
       ['feedback', 'Nodes that remember the last frame: Video Feedback, Random Walk, Feedback Deform.'],

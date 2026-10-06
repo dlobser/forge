@@ -225,6 +225,12 @@ then ffmpeg encodes `projects/<Name>/videos/<effect>.mp4`. The command template
 lives in Settings (placeholders `{fps} {start} {frames_in} {out}`); the resolved
 command is shown in the effect card and copyable.
 
+In the graph, the **Sequence → Video** node's `start` decides where a render
+begins. *where it is* (the default) records from the graph's current state and
+time: frame 0 is the frame on screen, and simulations, particles, trails and
+drawing clips carry on from there, as does the clock afterwards. *reset first*
+reseeds all of those and starts the clock at 0.
+
 ## Ports & conventions
 
 - Forge 8191, ComfyUI 8188. Sibling Zoom uses 8189/8190/8200 — no collision.

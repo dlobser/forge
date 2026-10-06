@@ -11,6 +11,7 @@ export default {
   category: "effect",
   animated: false,
   inputs: ["color", "depth"],
+  inputLabels: { color: "image", depth: "field" },
   controls: [
     { uniform: "uStrength",     label: "Strength",       type: "range", min: -0.3, max: 0.3, step: 0.001, value: 0.12 },
     { uniform: "uSampleRadius", label: "Field Smoothing", type: "range", min: 1, max: 8, step: 1, value: 2 },

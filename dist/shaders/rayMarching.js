@@ -5,7 +5,7 @@ export default {
     name: "Raymarch",
     category: "generate",
     inputs: ["color", "heightMap"],
-    inputLabels: { color: "color", heightMap: "height map" },
+    inputLabels: { color: "surface color", heightMap: "height map" },
     controls: [
         { uniform: "uHeightScale", label: "Height Scale", type: "range", min: 0, max: 3, step: 0.01, value: 0.8 },
         { uniform: "uTerrainSize", label: "Terrain Size",  type: "range", min: 0.5, max: 6, step: 0.05, value: 2 },

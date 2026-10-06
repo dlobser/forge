@@ -1,7 +1,7 @@
 // blend — composite two images with a selectable blend mode.
 //
-//   Color slot → image A (the base).
-//   Depth slot → image B (blended on top).
+//   A → the base image   (sampled as uColor)
+//   B → blended on top   (sampled as uDepth)
 //
 // Mix fades between the base and the blended result; Swap flips which image is
 // the base (matters for the non-symmetric modes like Overlay).
@@ -10,6 +10,7 @@ export default {
   category: "image",
   animated: false,
   inputs: ["color", "depth"],
+  inputLabels: { color: "A", depth: "B" },
   controls: [
     { uniform: "uMode", label: "Mode", type: "select", value: 0, options: [
       { value: 0, label: "Add" },

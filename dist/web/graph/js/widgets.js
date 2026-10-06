@@ -21,6 +21,18 @@ export function hexToRgb(h) {
   return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
 }
 
+// A `select` control's options as [{label, value}]. Options may be objects
+// ({value, label}) or bare strings (value = position).
+function selectOptions(c) {
+  return (c.options || []).map((o, i) => (o && typeof o === 'object')
+    ? { label: String(o.label ?? o.value ?? i), value: o.value ?? i }
+    : { label: String(o), value: i });
+}
+function optionLabel(opts, v) {
+  const o = opts.find((x) => x.value === v) || opts.find((x) => String(x.value) === String(v));
+  return o ? o.label : (opts[0] && opts[0].label);
+}
+
 // Add a single shader widget for one control. Used by addShaderWidgets and
 // by _togglePinMode when switching a control back from pin to slider.
 export function addSingleShaderWidget(node, c) {
@@ -33,9 +45,16 @@ export function addSingleShaderWidget(node, c) {
   } else if (c.type === 'bool') {
     w = node.addWidget('toggle', c.label, !!cur, set);
   } else if (c.type === 'select') {
-    const values = {};
-    (c.options || []).forEach((o, i) => { values[o.label ?? String(o)] = (o.value ?? i); });
-    w = node.addWidget('combo', c.label, cur, set, { values });
+    // The combo holds the option NAMES and the callback turns a name back into the
+    // uniform's number. Litegraph reads an object of values as {value: label}, so
+    // the {label: value} map this used to pass showed every mode as 0, 1, 2… in the
+    // dropdown and "undefined" on the node.
+    const opts = selectOptions(c);
+    w = node.addWidget('combo', c.label, optionLabel(opts, cur), (label) => {
+      const o = opts.find((x) => x.label === label);
+      if (o) set(o.value);
+    }, { values: opts.map((o) => o.label) });
+    w._opts = opts;
   } else if (c.type === 'color') {
     w = node.addWidget('text', c.label, rgbToHex(cur), (v) => set(hexToRgb(v)));
   } else {
@@ -57,7 +76,7 @@ export function syncShaderWidgets(node) {
   for (const w of node.widgets || []) {
     if (w._uniform === undefined) continue;
     const v = node.properties.params[w._uniform];
-    w.value = w._isColor ? rgbToHex(v) : v;
+    w.value = w._isColor ? rgbToHex(v) : w._opts ? optionLabel(w._opts, v) : v;
   }
 }
 

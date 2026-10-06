@@ -157,6 +157,12 @@
       "vert": null
     },
     {
+      "key": "premultiply",
+      "js": "/shaders/premultiply.js",
+      "frag": "/shaders/premultiply.frag",
+      "vert": null
+    },
+    {
       "key": "randomWalk",
       "js": "/shaders/randomWalk.js",
       "frag": "/shaders/randomWalk.frag",

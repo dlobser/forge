@@ -7,6 +7,7 @@ export default {
   category: "image",
   animated: false,
   inputs: ["color"],
+  inputLabels: { color: "image" },
   controls: [
     { uniform: "uMode",      label: "Mode", type: "select", value: 0,
       options: [

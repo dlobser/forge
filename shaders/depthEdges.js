@@ -13,6 +13,7 @@ export default {
   category: "depth",
   animated: false,
   inputs: ["color", "depth"],
+  inputLabels: { color: "image", depth: "depth" },
   controls: [
     { uniform: "uEdgeMix",   label: "Edge / Color Mix", type: "range", min: 0, max: 1,  step: 0.01, value: 0.5 },
     { uniform: "uEdgeScale", label: "Edge Strength",    type: "range", min: 0, max: 25, step: 0.1,  value: 8 },

@@ -6,7 +6,7 @@ export default {
   animated: true,
   history: true,
   inputs: ["color", "hold"],
-  inputLabels: { color: "image input", hold: "freeze mask" },
+  inputLabels: { color: "image", hold: "freeze mask" },
   inputDefaults: { hold: "black" },
   controls: [
     { uniform: "uMode", label: "Mode", type: "select", value: 1,

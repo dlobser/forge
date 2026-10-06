@@ -11,6 +11,7 @@ export default {
   category: "effect",
   animated: false,
   inputs: ["color"],
+  inputLabels: { color: "image" },
   controls: [
     { uniform: "uThreshold", label: "Seed Threshold", type: "range", min: 0, max: 1,   step: 0.01, value: 0.5 },
     { uniform: "uSpread",    label: "Spread",          type: "range", min: 0.02, max: 1, step: 0.01, value: 0.4 },

@@ -5,6 +5,7 @@ export default {
   category: "depth",
   animated: true,
   inputs: ["color", "depth"],
+  inputLabels: { color: "image", depth: "depth" },
   controls: [
     { uniform: "uAmplitude", label: "Amplitude", type: "range", min: 0, max: 0.1, step: 0.001, value: 0.02 },
     { uniform: "uOffsetX",   label: "X Offset",  type: "range", min: -1, max: 1,   step: 0.01,  value: 0, defaultPin: true },
