@@ -69,6 +69,10 @@
         <option value="1024">1024</option><option value="2048">2048</option><option value="4096">4096</option>
       </select></div>
     <div class="hint">Per node: right-click a shader node → <b>Render size</b>. (The feedback “sim grid” is a separate, internal resolution.)</div>
+    <div class="row" style="border-top:1px solid var(--line);padding-top:10px;margin-top:2px">
+      <label>Cloud AI</label>
+      <button id="cloudBtn" class="btn">Provider &amp; keys…</button></div>
+    <div id="cloudHint" class="hint"></div>
   </div>
   <canvas id="graphcanvas" tabindex="1"></canvas>
   <canvas id="glcanvas" width="512" height="512"></canvas>

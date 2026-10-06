@@ -6,7 +6,10 @@
 import { RT } from './runtime.js';
 import { loadImage } from './engine.js';
 import { downloadTexture, openLiveView } from './liveview.js';
-import { addShaderWidgets, addSingleShaderWidget, addAiWidgets, syncShaderWidgets, markDirty } from './widgets.js';
+import { addShaderWidgets, addSingleShaderWidget, addAiWidgets, syncShaderWidgets, markDirty, openTextEditor } from './widgets.js';
+import { registerDrawingNode } from './drawing.js';
+import { siteURL } from './boot.js';
+import { cloud, cloudDepth, cloudGenerate, askForKey, openCloudDialog, onCloudChange, elapsed } from './cloudai.js';
 
 const LG = window.LiteGraph;
 const IMG = 'IMAGE';
@@ -17,8 +20,9 @@ const THUMB_H = 116;
 // the category half. Everything used to live under one flat `forge/` category, which
 // told you nothing you didn't already know — you are in Forge. Now the category says
 // what the node is FOR (input, image, effect, generate, cellular, feedback, depth,
-// control, output, ai, utility), and shader nodes get theirs from `category` in
-// their own manifest, so adding a shader files it correctly with no changes here.
+// control, output, local ai, cloud ai, utility), and shader nodes get theirs from
+// `category` in their own manifest, so adding a shader files it correctly with no
+// changes here.
 export const T = {
   SOURCE: 'input/source',
   IMPORT: 'input/import',
@@ -29,7 +33,11 @@ export const T = {
   SLIDER: 'control/slider',
   NUMBER: 'control/number',
   TOGGLE: 'control/toggle',
-  DEPTH: 'ai/depth',
+  // "local ai" runs on this machine (ComfyUI); "cloud ai" calls ChatGPT or Gemini
+  // from the browser with the person's own key, so it works on a published page too
+  DEPTH: 'local ai/depth',
+  CLOUD_DEPTH: 'cloud ai/depth',
+  GENERATE: 'cloud ai/generate',
   VIEWER: 'output/viewer',
   VIEWER_WINDOW: 'output/viewer_window',
   SAVE: 'output/save',
@@ -50,6 +58,7 @@ const LEGACY = {
   'forge/control/number': T.NUMBER,
   'forge/control/toggle': T.TOGGLE,
   'forge/depth': T.DEPTH,
+  'ai/depth': T.DEPTH,          // before the local / cloud split
   'forge/viewer': T.VIEWER,
   'forge/viewer_window': T.VIEWER_WINDOW,
   'forge/save': T.SAVE,
@@ -61,6 +70,7 @@ const LEGACY = {
 // care what a node is (the Author-UI panel, the published page).
 export const isViewer = (n) => !!n && (n.type === T.VIEWER || n.type === 'forge/viewer');
 export const isSource = (n) => !!n && (n.type === T.SOURCE || n.type === 'forge/source');
+export const isCloudAI = (n) => !!n && /^cloud ai\//.test(n.type || '');
 
 const resolveType = (type) => (!LG.registered_node_types[type] && LEGACY[type]) ? LEGACY[type] : type;
 
@@ -224,7 +234,9 @@ function drawImage(node, ctx, tex, a) {
 function attachThumb(node) {
   node.onDrawForeground = function (ctx) {
     if (this.flags.collapsed) return;
-    drawImage(this, ctx, this._out && this._out.tex, { x: 0, y: this.size[1] - THUMB_H, w: this.size[0], h: THUMB_H });
+    const a = { x: 0, y: this.size[1] - THUMB_H, w: this.size[0], h: THUMB_H };
+    drawImage(this, ctx, this._out && this._out.tex, a);
+    if (this._busySince) drawBusy(this, ctx, a);
     if (this._status) {
       ctx.fillStyle = this._statusColor || '#ffcc66'; ctx.font = '10px sans-serif';
       ctx.fillText(this._status, 8, this.size[1] - THUMB_H - 5);
@@ -235,6 +247,36 @@ function sizeWithThumb(node) {
   node.size = node.computeSize();
   if (node.size[0] < 210) node.size[0] = 210;
   node.size[1] += THUMB_H;
+}
+
+// ── busy overlay: a spinner + clock over the thumbnail while a slow job runs ─────
+// A cloud image takes ten seconds to a couple of minutes and reports no progress, so
+// the node says it's working — and for how long — rather than sitting there looking
+// stuck. A paused graph only repaints when dirty, so a timer keeps it ticking.
+const spinning = new Set();
+let spinTimer = 0;
+function setBusy(node, label) {
+  if (label) { node._busySince = performance.now(); node._busyLabel = label; spinning.add(node); }
+  else { node._busySince = 0; spinning.delete(node); }
+  if (spinning.size && !spinTimer) spinTimer = setInterval(() => RT.redraw(), 50);
+  if (!spinning.size && spinTimer) { clearInterval(spinTimer); spinTimer = 0; }
+  RT.redraw();
+}
+function drawBusy(node, ctx, a) {
+  const t = (performance.now() - node._busySince) / 1000;
+  ctx.save();
+  ctx.fillStyle = 'rgba(10,12,15,0.72)'; ctx.fillRect(a.x, a.y, a.w, a.h);
+  const cx = a.x + a.w / 2, cy = a.y + a.h / 2 - 12, r = 15;
+  ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.strokeStyle = '#2a3140'; ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+  const a0 = t * 5;
+  ctx.strokeStyle = '#5b8cff'; ctx.beginPath(); ctx.arc(cx, cy, r, a0, a0 + 1.6 + Math.sin(t * 2.4) * 0.9); ctx.stroke();
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#e6e8ea'; ctx.font = '11px sans-serif';
+  ctx.fillText(node._busyLabel + '  ' + elapsed(node._busySince), cx, cy + r + 17);
+  ctx.fillStyle = '#8a929c'; ctx.font = '10px sans-serif';
+  ctx.fillText(t > 120 ? 'slower than usual — still waiting' : 'working — can take a minute', cx, cy + r + 31);
+  ctx.restore();
 }
 const imageSize = (h) => ({ width: (h && h.width) || RT.RENDER_SIZE, height: (h && h.height) || RT.RENDER_SIZE });
 const nodeRenderSize = (node, input) => {
@@ -680,13 +722,83 @@ CropScaleNode.prototype.evaluate = function () {
 };
 CropScaleNode.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this); };
 
+// ── pin ↔ slider (shader and pipeline nodes) ───────────────────────────────────
+// Any numeric control can trade its slider for an input pin, so a math node or a
+// slider elsewhere can drive it: right-click ▸ Input Modes. The choice lives in
+// properties.pinModes; the pin itself is saved with the graph like any input.
+const pinnableControls = (def) => (def.controls || []).filter((c) => c.type === 'range' || c.type === 'number' || c.type === 'bool');
+
+// after a load: drop the slider of each pinned control and tag its restored pin
+function restorePins(node, pinnable) {
+  const modes = node.properties.pinModes = node.properties.pinModes || {};
+  for (const c of pinnable) {
+    const inpIdx = (node.inputs || []).findIndex((s) => s.name === c.label && s.type === 'number');
+    if (modes[c.uniform] === 'pin') {
+      const wIdx = (node.widgets || []).findIndex((w) => w._uniform === c.uniform);
+      if (wIdx >= 0) node.widgets.splice(wIdx, 1);
+      if (inpIdx >= 0) node.inputs[inpIdx]._ctrlUniform = c.uniform;
+    } else if (inpIdx >= 0) {
+      // slider mode: remove any leftover pin (backward compat with old saves)
+      node.disconnectInput(inpIdx); node.removeInput(inpIdx);
+    }
+  }
+}
+
+// a pinned control reads its input; a slider control keeps the widget's value
+function applyPins(node, pinnable, params) {
+  const modes = node.properties.pinModes || {};
+  for (const c of pinnable) {
+    if (modes[c.uniform] !== 'pin') continue;
+    const pinIdx = (node.inputs || []).findIndex((s) => s._ctrlUniform === c.uniform);
+    if (pinIdx < 0) continue;
+    const v = node.getInputData(pinIdx);
+    if (typeof v === 'number' && !isNaN(v)) params[c.uniform] = (c.type === 'bool') ? (v > 0.5) : v;
+  }
+  return params;
+}
+
+function togglePin(node, c) {
+  const modes = node.properties.pinModes = node.properties.pinModes || {};
+  if (modes[c.uniform] === 'pin') {
+    modes[c.uniform] = 'slider';
+    const inpIdx = (node.inputs || []).findIndex((s) => s._ctrlUniform === c.uniform);
+    if (inpIdx >= 0) { node.disconnectInput(inpIdx); node.removeInput(inpIdx); }
+    addSingleShaderWidget(node, c);
+  } else {
+    modes[c.uniform] = 'pin';
+    const wIdx = (node.widgets || []).findIndex((w) => w._uniform === c.uniform);
+    if (wIdx >= 0) node.widgets.splice(wIdx, 1);
+    node.addInput(c.label, 'number');
+    node.inputs[node.inputs.length - 1]._ctrlUniform = c.uniform;
+  }
+  sizeWithThumb(node);
+  markDirty(node);
+}
+
+// the right-click "Input Modes" submenu, or null when nothing is pinnable
+function pinMenuItem(node, pinnable) {
+  if (!pinnable.length) return null;
+  const modes = node.properties.pinModes || {};
+  return {
+    content: 'Input Modes',
+    has_submenu: true,
+    callback: function (_v, _opts, e, menu) {
+      const sub = pinnable.map((c) => {
+        const isPin = modes[c.uniform] === 'pin';
+        return { content: (isPin ? '● ' : '○ ') + c.label + (isPin ? '  (pin)' : '  (slider)'), callback: () => togglePin(node, c) };
+      });
+      new LG.ContextMenu(sub, { event: e, parentMenu: menu, title: 'Input Modes' });
+    },
+  };
+}
+
 // ── Shader (one type per scanned shader) ───────────────────────────────────────
 function makeShaderNode(def) {
   // an explicit inputs:[] means a generator (no pins); only undefined defaults to color/depth
   const inputs = Array.isArray(def.inputs) ? def.inputs : ['color', 'depth'];
   const labels = def.inputLabels || {};
   // numeric controls also get an optional float input pin (drive them with math nodes)
-  const pinnable = (def.controls || []).filter((c) => c.type === 'range' || c.type === 'number' || c.type === 'bool');
+  const pinnable = pinnableControls(def);
   // A manifest may declare several `outputs` (e.g. Split Channels' R/G/B/A). The
   // node then renders the same program once per slot with uOutput set to its index.
   // Not for stateful shaders: those step their simulation inside the draw, so one
@@ -718,21 +830,7 @@ function makeShaderNode(def) {
   Node.prototype.onConfigure = function () {
     this._dirty = true;
     syncShaderWidgets(this);
-    const modes = this.properties.pinModes = this.properties.pinModes || {};
-    for (const c of pinnable) {
-      if (modes[c.uniform] === 'pin') {
-        // Remove widget (slider) for this control
-        const wIdx = (this.widgets || []).findIndex((w) => w._uniform === c.uniform);
-        if (wIdx >= 0) this.widgets.splice(wIdx, 1);
-        // Tag the restored input so evaluate() can find it
-        const inpIdx = (this.inputs || []).findIndex((s) => s.name === c.label && s.type === 'number');
-        if (inpIdx >= 0) this.inputs[inpIdx]._ctrlUniform = c.uniform;
-      } else {
-        // Slider mode: remove any leftover pin (backward compat with old saves)
-        const inpIdx = (this.inputs || []).findIndex((s) => s.name === c.label && s.type === 'number');
-        if (inpIdx >= 0) { this.disconnectInput(inpIdx); this.removeInput(inpIdx); }
-      }
-    }
+    restorePins(this, pinnable);
   };
 
   Node.prototype.evaluate = function () {
@@ -742,17 +840,7 @@ function makeShaderNode(def) {
       if (h && h.tex) { inTex[name] = h.tex; vers.push(h.version | 0); } else vers.push(-1);
     });
     // resolve params: a pin-mode control reads from its input; slider-mode uses the widget value
-    const params = Object.assign({}, this.properties.params);
-    const modes = this.properties.pinModes || {};
-    pinnable.forEach((c) => {
-      if (modes[c.uniform] === 'pin') {
-        const pinIdx = (this.inputs || []).findIndex((s) => s._ctrlUniform === c.uniform);
-        if (pinIdx >= 0) {
-          const v = this.getInputData(pinIdx);
-          if (typeof v === 'number' && !isNaN(v)) params[c.uniform] = (c.type === 'bool') ? (v > 0.5) : v;
-        }
-      }
-    });
+    const params = applyPins(this, pinnable, Object.assign({}, this.properties.params));
     const feedback = !!def.feedback;
     const history = !!def.history;
     // A stateful shader (feedback sim or history buffer) is running a simulation, so
@@ -814,7 +902,6 @@ function makeShaderNode(def) {
   // ── right-click menu: render size, plus pin ↔ slider per control ──
   Node.prototype.getExtraMenuOptions = function () {
     const node = this;
-    const modes = this.properties.pinModes || {};
     const current = this._size || nodeRenderSize(this);
     const items = [{
       content: 'Render size: ' + current.width + ' × ' + current.height,
@@ -834,46 +921,12 @@ function makeShaderNode(def) {
         });
       }
     }];
-    if (pinnable.length) items.push({
-      content: 'Input Modes',
-      has_submenu: true,
-      callback: function (_v, _opts, e, menu) {
-        const sub = pinnable.map((c, j) => {
-          const isPin = modes[c.uniform] === 'pin';
-          return { content: (isPin ? '● ' : '○ ') + c.label + (isPin ? '  (pin)' : '  (slider)'), callback: function () { node._togglePinMode(j); } };
-        });
-        new LG.ContextMenu(sub, { event: e, parentMenu: menu, title: 'Input Modes' });
-      }
-    });
+    const pins = pinMenuItem(node, pinnable);
+    if (pins) items.push(pins);
     return items;
   };
 
-  if (pinnable.length) {
-    Node.prototype._togglePinMode = function (ctrlIdx) {
-      const c = pinnable[ctrlIdx];
-      const modes = this.properties.pinModes = this.properties.pinModes || {};
-      const isPin = modes[c.uniform] === 'pin';
-      if (isPin) {
-        // Pin → Slider: remove pin, add widget
-        modes[c.uniform] = 'slider';
-        const inpIdx = (this.inputs || []).findIndex((s) => s._ctrlUniform === c.uniform);
-        if (inpIdx >= 0) { this.disconnectInput(inpIdx); this.removeInput(inpIdx); }
-        addSingleShaderWidget(this, c);
-      } else {
-        // Slider → Pin: remove widget, add pin
-        modes[c.uniform] = 'pin';
-        const wIdx = (this.widgets || []).findIndex((w) => w._uniform === c.uniform);
-        if (wIdx >= 0) this.widgets.splice(wIdx, 1);
-        this.addInput(c.label, 'number');
-        this.inputs[this.inputs.length - 1]._ctrlUniform = c.uniform;
-      }
-      // recalculate size
-      this.size = this.computeSize();
-      if (this.size[0] < 210) this.size[0] = 210;
-      this.size[1] += THUMB_H;
-      markDirty(this);
-    };
-  }
+  Node.prototype._togglePinMode = function (ctrlIdx) { togglePin(this, pinnable[ctrlIdx]); };
 
   // Category comes from the shader's own manifest, so a new shader files itself.
   const type = (def.category || 'effect') + '/' + def.key;
@@ -922,7 +975,7 @@ function loadPipelineSources(def) {
 
     const promise = Promise.all(files.map(async (file) => {
         if (!file) throw new Error('Incomplete pipeline declaration for ' + def.key);
-        const res = await fetch('/shaders/' + file);
+        const res = await fetch(siteURL('/shaders/' + file));
         if (!res.ok) throw new Error('Could not load pipeline shader: ' + file);
         return res.text();
     })).then(([updateVertSrc, updateFragSrc, renderVertSrc, renderFragSrc]) => ({
@@ -939,6 +992,7 @@ function loadPipelineSources(def) {
 function makePipelineNode(def) {
     const pipeline = pipelineFromDef(def);
     const controls = def.controls || [];
+    const pinnable = pinnableControls(def);
     const inputs = Array.isArray(def.inputs) ? def.inputs : [];
     const labels = def.inputLabels || {};
     const controlValue = (params, uniform) => {
@@ -972,8 +1026,10 @@ function makePipelineNode(def) {
     function Node() {
         for (const name of inputs) this.addInput(labels[name] || name, IMG);
         this.addOutput('out', IMG);
+        // numeric controls can be swapped for input pins (right-click ▸ Input Modes)
         this.properties = {
             params: {},
+            pinModes: {},
             simSize: pipeline.stateSize || 64,
         };
 
@@ -1034,6 +1090,7 @@ function makePipelineNode(def) {
         this.properties.params = this.properties.params || {};
         setWidget(this, pipeline.sizeLabel || 'state grid', this.properties.simSize);
         syncShaderWidgets(this);
+        restorePins(this, pinnable);
         this._dirty = true;
     };
 
@@ -1041,7 +1098,7 @@ function makePipelineNode(def) {
         const sources = this._pipelineSources;
         if (!sources) return;
 
-        const params = Object.assign({}, this.properties.params);
+        const params = applyPins(this, pinnable, Object.assign({}, this.properties.params));
         const inTex = {};
         const versions = [];
         inputs.forEach((name, i) => {
@@ -1149,7 +1206,7 @@ function makePipelineNode(def) {
         const node = this;
         const current = this._size || nodeRenderSize(this);
 
-        return [{
+        const items = [{
             content: 'Render size: ' + current.width + ' × ' + current.height,
             has_submenu: true,
             callback: function (_v, _opts, e, menu) {
@@ -1187,7 +1244,12 @@ function makePipelineNode(def) {
                 });
             },
         }];
+        const pins = pinMenuItem(node, pinnable);
+        if (pins) items.push(pins);
+        return items;
     };
+
+    Node.prototype._togglePinMode = function (ctrlIdx) { togglePin(this, pinnable[ctrlIdx]); };
 
     const type = (def.category || 'generate') + '/' + def.key;
     LEGACY['forge/shader/' + def.key] = type;
@@ -1195,34 +1257,258 @@ function makePipelineNode(def) {
 }
 
 
-// ── Depth (auto-bakes via ComfyUI on input change) ─────────────────────────────
-function DepthNode() {
-  this.addInput('image', IMG); this.addOutput('depth', IMG);
-  this.properties = { output: '' };
-  this._size = RT.RENDER_SIZE; this._status = 'connect an image';
-  attachThumb(this); this.size = [210, 120 + THUMB_H];
+// ── Depth (auto-bakes on input change) ─────────────────────────────────────────
+// Two nodes, one per back end: Local AI ▸ Depth asks ComfyUI on this machine, Cloud
+// AI ▸ Depth asks ChatGPT or Gemini (⚙ Settings ▸ Cloud AI). Everything else is
+// shared. A bake is slow — and in the cloud, paid — so the node keeps a tiny
+// signature of the picture its saved map was made from. Reopening the graph, or a
+// visitor opening the published page, reuses that map instead of baking again; only
+// a genuinely different input re-bakes. One bake at a time: changes that land
+// mid-bake queue behind it and only the latest runs.
+const SIG = 16;   // signature = SIG×SIG luma thumbnail, base64
+async function imageSignature(blob) {
+  const bmp = await createImageBitmap(blob);
+  const c = document.createElement('canvas'); c.width = c.height = SIG;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(bmp, 0, 0, SIG, SIG); if (bmp.close) bmp.close();
+  const d = ctx.getImageData(0, 0, SIG, SIG).data;
+  let s = '';
+  for (let i = 0; i < d.length; i += 4) s += String.fromCharCode((d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8);
+  return btoa(s);
 }
-DepthNode.title = 'Depth (ComfyUI)';
-DepthNode.prototype.evaluate = function () {
-  const h = this.getInputData(0);
-  const v = h && h.tex ? (h.version | 0) : -1;
-  if (v !== this._inV) { this._inV = v; if (h && h.tex) this._schedule(h); }
-  if (this._out && this._out.tex) this.setOutputData(0, this._out);
-};
-DepthNode.prototype._schedule = function (h) {
-  clearTimeout(this._t); this._status = 'depth queued…'; this._statusColor = '#ffcc66'; RT.redraw();
-  this._t = setTimeout(() => this._bake(h), 600);
-};
-DepthNode.prototype._bake = async function (h) {
+// Tolerant, not exact: another browser decodes the same JPEG a level or two apart,
+// and that must still count as the same picture.
+function sameSignature(a, b) {
   try {
-    this._status = 'depth…'; RT.redraw();
-    const s = imageSize(h); const blob = await RT.engine.captureTexture(h.tex, s.width, s.height);
+    const x = atob(a), y = atob(b);
+    if (x.length !== y.length) return false;
+    let sum = 0;
+    for (let i = 0; i < x.length; i++) sum += Math.abs(x.charCodeAt(i) - y.charCodeAt(i));
+    return sum / x.length < 3;
+  } catch (e) { return false; }
+}
+
+const DepthBase = {
+  // show the saved map straight away; the first input then decides whether it still fits
+  onConfigure() {
+    const file = this.properties.output;
+    if (!file) return;
+    this._cached = loadImage(RT.imageURL(file)).then((img) => {
+      // the web build answers a file it doesn't have with a 1×1 placeholder
+      if (!img || img.naturalWidth <= 1 || this.properties.output !== file) return;
+      setImageOut(this, img);
+    }).catch(() => {});
+  },
+  evaluate() {
+    const h = this.getInputData(0);
+    const v = h && h.tex ? (h.version | 0) : -1;
+    if (h !== this._inH || v !== this._inV) { this._inH = h; this._inV = v; if (h && h.tex) this._schedule(h); }
+    if (this._out && this._out.tex) this.setOutputData(0, this._out);
+  },
+  onDblClick() { if (this._out && this._out.tex) openFull(this); },
+  _schedule(h) {
+    clearTimeout(this._t);
+    this._next = h;
+    if (this._busy) return;                       // picked up when the current bake ends
+    this._status = 'depth queued…'; this._statusColor = '#ffcc66'; RT.redraw();
+    this._t = setTimeout(() => this._run(), this._delay);
+  },
+  async _run() {
+    const h = this._next; this._next = null;
+    if (!h || !h.tex) return;
+    this._busy = true;
+    try { await this._bake(h); }
+    finally { this._busy = false; if (this._next) this._schedule(this._next); }
+  },
+  _regenerate() {
+    const h = this.getInputData(0);
+    if (!h || !h.tex) return RT.toast('Connect an image first', 'bad');
+    this._force = true; this._schedule(h);
+  },
+  async _bake(h) {
+    const force = this._force; this._force = false;
+    this._retry = false;
+    const s = imageSize(h);
+    const blob = await RT.engine.captureTexture(h.tex, s.width, s.height);
+    const sig = await imageSignature(blob);
+
+    if (this._cached) { await this._cached; this._cached = null; }
+    // A graph saved before signatures existed trusts its map for the first input.
+    const fits = this.properties.srcSig ? sameSignature(sig, this.properties.srcSig) : !this._seen;
+    this._seen = true;
+    if (!force && this._out && this._out.tex && fits) {
+      this.properties.srcSig = sig; this._status = null; RT.redraw(); return;
+    }
+    await this._make(blob, s, sig, force);
+  },
+};
+
+function makeDepthNode(title, delay, make) {
+  function Node() {
+    this.addInput('image', IMG); this.addOutput('depth', IMG);
+    this.properties = { output: '', srcSig: '' };
+    this.addWidget('button', '↻ regenerate', null, () => this._regenerate());
+    this._size = RT.RENDER_SIZE; this._status = 'connect an image';
+    attachThumb(this); this.size = [210, 120 + THUMB_H];
+  }
+  Node.title = title;
+  Object.assign(Node.prototype, DepthBase, { _delay: delay, _make: make });
+  return Node;
+}
+
+// Local AI ▸ Depth: DepthAnything through ComfyUI, via the Forge server.
+const LocalDepthNode = makeDepthNode('Depth (ComfyUI)', 600, async function (blob, s, sig) {
+  this._status = 'ComfyUI depth…'; this._statusColor = '#ffcc66';
+  setBusy(this, 'ComfyUI');
+  try {
     const saved = await RT.api.renderSave(RT.project, 'depth_in', blob, { graph: true, intermediate: true });
     const out = await RT.api.depth(RT.project, saved.filename);
-    this.properties.output = out.filename; RT.requestSave(); RT.refreshGallery();
-    loadImage(RT.imageURL(out.filename) + '&v=' + Date.now()).then((img) => setImageOut(this, img));
-  } catch (e) { this._status = 'depth failed'; this._statusColor = '#ff6666'; RT.toast('Depth failed: ' + e.message, 'bad'); }
+    if (!out || !out.filename) throw new Error('no depth backend here');
+    const img = await loadImage(RT.imageURL(out.filename) + '&v=' + Date.now());
+    setImageOut(this, img);
+    this.properties.output = out.filename; this.properties.srcSig = sig;
+    RT.requestSave(); RT.refreshGallery();
+  } catch (e) {
+    this._status = RT.comfyOk ? 'depth failed' : 'needs local ComfyUI'; this._statusColor = '#ff6666';
+    RT.toast('Depth failed: ' + e.message + (RT.comfyOk ? ''
+      : ' — there’s no local ComfyUI here. Cloud AI ▸ Depth can make one with ChatGPT or Gemini instead.'), 'bad');
+  } finally { setBusy(this, null); }
+});
+
+// Cloud AI ▸ Depth: ChatGPT or Gemini, straight from the browser.
+const CloudDepthNode = makeDepthNode('Depth (Cloud AI)', 1500, async function (blob, s, sig, force) {
+  // Made a cloud map of this picture before (an earlier visit to a share link, another
+  // node)? The gallery remembers which picture each one came from — reuse it.
+  const prior = !force && RT.gallery.find((i) => i.meta && i.meta.srcSig
+    && (i.meta.depth === 'cloud' || i.meta.depth === 'openai') && sameSignature(sig, i.meta.srcSig));
+  if (prior) {
+    try {
+      const img = await loadImage(RT.imageURL(prior.filename));
+      if (img && img.naturalWidth > 1) {
+        setImageOut(this, img);
+        this.properties.output = prior.filename; this.properties.srcSig = sig; RT.requestSave();
+        return;
+      }
+    } catch (e) {}
+  }
+  if (!cloud.ready) {
+    this._status = 'needs a ' + cloud.name + ' API key'; this._statusColor = '#ff6666'; this._retry = true; RT.redraw();
+    askForKey('Cloud AI ▸ Depth uses ' + cloud.name + ' — add your API key to make a depth map.');
+    return;
+  }
+  this._status = cloud.name + ' depth…'; this._statusColor = '#ffcc66';
+  setBusy(this, cloud.name);
+  try {
+    const out = await cloudDepth(blob, s.width, s.height);
+    setImageOut(this, out.canvas);
+    this.properties.srcSig = sig;
+    // Keep a copy in the gallery so a reload reuses it. The published player has
+    // nowhere to save — fine, the map is already on screen.
+    try {
+      const saved = await RT.api.renderSave(RT.project, 'depth', out.blob,
+        { graph: true, depth: 'cloud', provider: out.provider, model: out.model, srcSig: sig });
+      if (saved && saved.filename) { this.properties.output = saved.filename; RT.refreshGallery(); }
+    } catch (e) {}
+    RT.requestSave();
+  } catch (e) {
+    this._status = 'depth failed'; this._statusColor = '#ff6666'; this._retry = true;
+    RT.toast('Depth failed: ' + e.message, 'bad');
+    if (e.auth) askForKey(e.message + ' — check the API key.');
+  } finally { setBusy(this, null); }
+});
+
+// New key / other provider: give any cloud depth node that couldn't bake another go.
+onCloudChange(() => {
+  for (const n of (RT.graph && RT.graph._nodes) || []) if (n.type === T.CLOUD_DEPTH && n._retry) { n._retry = false; n._inV = NaN; }
+});
+
+// ── Generate (Cloud AI: a prompt → a picture) ───────────────────────────────────
+// Write a prompt, press ✦ Generate, get an image from ChatGPT or Gemini (whichever ⚙
+// Settings ▸ Cloud AI picks). Connect a picture to `image` and it goes along with
+// the prompt — "make this a watercolor", "put this cat on the moon". It never runs by
+// itself: every press is a paid call, so it only happens when someone asks.
+const GEN_ASPECTS = ['match input', '1:1', '4:3', '3:4', '3:2', '2:3', '16:9', '9:16'];
+const promptLabel = (s) => {
+  s = String(s || '').replace(/\s+/g, ' ').trim();
+  return s ? '✎ ' + (s.length > 28 ? s.slice(0, 28) + '…' : s) : '✎ write a prompt…';
 };
+function GenerateNode() {
+  this.addInput('image', IMG);
+  this.addOutput('out', IMG);
+  this.properties = { values: { prompt: '' }, aspect: 'match input', output: '' };
+  // The name stays 'prompt' (the Author UI finds controls by name); the label shows
+  // the text. `_pid` makes the published page render it as a textarea, like the
+  // ComfyUI nodes' prompts.
+  this._pw = this.addWidget('button', 'prompt', null, () => this._editPrompt());
+  this._pw._pid = 'prompt';
+  this.addWidget('combo', 'aspect', this.properties.aspect, (v) => { this.properties.aspect = v; RT.requestSave(); }, { values: GEN_ASPECTS });
+  this.addWidget('button', '✦ Generate', null, () => this._generate());
+  this._size = RT.RENDER_SIZE; this._status = 'write a prompt, then ✦ Generate';
+  this._syncPrompt();
+  attachThumb(this); sizeWithThumb(this);
+  this.size[0] = Math.max(this.size[0], 240);
+}
+GenerateNode.title = 'Generate (Cloud AI)';
+GenerateNode.prototype._syncPrompt = function () { this._pw.label = promptLabel(this.properties.values.prompt); RT.redraw(); };
+GenerateNode.prototype._editPrompt = function () {
+  openTextEditor('Prompt — Ctrl+Enter to save', this.properties.values.prompt || '', (v) => {
+    this.properties.values.prompt = v; this._syncPrompt(); RT.requestSave();
+  });
+};
+GenerateNode.prototype._generate = async function () {
+  if (this._busySince) return RT.toast('Still generating — hang on');
+  const prompt = String(this.properties.values.prompt || '').trim();
+  if (!prompt) { RT.toast('Write a prompt first', 'bad'); return this._editPrompt(); }
+  if (!cloud.ready) {
+    const ok = await openCloudDialog({ reason: 'Generate uses ' + cloud.name + ' — add your API key, or pick the other provider.' });
+    if (!ok || !cloud.ready) return;
+  }
+  // a connected picture goes along with the prompt, and sets the shape unless the
+  // aspect says otherwise
+  const h = this.getInputData(0);
+  const images = [];
+  let aspect = 1;
+  if (h && h.tex) {
+    const s = imageSize(h);
+    images.push(await RT.engine.captureTexture(h.tex, s.width, s.height));
+    aspect = s.width / s.height;
+  }
+  const [aw, ah] = String(this.properties.aspect || '').split(':').map(Number);
+  if (aw > 0 && ah > 0) aspect = aw / ah;
+
+  this._status = cloud.name + (images.length ? ' · prompt + image' : ' · prompt'); this._statusColor = '#ffcc66';
+  setBusy(this, cloud.name);
+  try {
+    const out = await cloudGenerate({ prompt, images, aspect });
+    setImageOut(this, out.canvas);
+    try {
+      const saved = await RT.api.renderSave(RT.project, 'generate', out.blob,
+        { graph: true, generate: out.provider, model: out.model, prompt: prompt.slice(0, 500), withImage: images.length > 0 });
+      if (saved && saved.filename) { this.properties.output = saved.filename; RT.refreshGallery(); }
+    } catch (e) {}
+    RT.requestSave();
+    RT.toast('Generated with ' + out.name, 'good');
+  } catch (e) {
+    this._status = 'generate failed'; this._statusColor = '#ff6666';
+    RT.toast('Generate failed: ' + e.message, 'bad');
+    if (e.auth) openCloudDialog({ reason: e.message });
+  } finally { setBusy(this, null); }
+};
+GenerateNode.prototype.onConfigure = function () {
+  const p = this.properties;
+  if (!p.values) p.values = { prompt: '' };
+  if (!p.aspect) p.aspect = 'match input';
+  setWidget(this, 'aspect', p.aspect);
+  this._syncPrompt();
+  if (!p.output) return;
+  const file = p.output;
+  loadImage(RT.imageURL(file)).then((img) => {
+    if (img && img.naturalWidth > 1 && this.properties.output === file) setImageOut(this, img);
+  }).catch(() => {});
+};
+GenerateNode.prototype.evaluate = function () { if (this._out && this._out.tex) this.setOutputData(0, this._out); };
+GenerateNode.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this); };
 
 // ── AI workflow (one type per workflow; manual Generate) ───────────────────────
 function makeAiNode(wf) {
@@ -1257,7 +1543,8 @@ function makeAiNode(wf) {
   Node.prototype._generate = async function () {
     if (!this._schema) return RT.toast('Schema still loading', 'bad');
     if (!RT.comfyOk) { RT.toast('ComfyUI not reachable', 'bad'); return; }
-    this._status = 'generating…'; this._statusColor = '#ffcc66'; RT.redraw();
+    this._status = 'generating…'; this._statusColor = '#ffcc66';
+    setBusy(this, 'ComfyUI');
     try {
       if (this.properties.randomizeSeed !== false) {
         for (const p of this._schema.params) if (/seed/i.test(p.input || '')) {
@@ -1284,11 +1571,12 @@ function makeAiNode(wf) {
         .catch(() => { this._status = 'generated (preview failed)'; });
       RT.toast('Generated ' + out.filename, 'good');
     } catch (e) { this._status = 'generate failed'; this._statusColor = '#ff6666'; RT.toast('Generate failed: ' + e.message, 'bad'); }
+    finally { setBusy(this, null); }
   };
   Node.prototype.evaluate = function () { if (this._out && this._out.tex) this.setOutputData(0, this._out); };
   Node.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this); };
-  LEGACY['forge/ai/' + wf.key] = 'ai/' + wf.key;
-  LG.registerNodeType('ai/' + wf.key, Node);
+  LEGACY['forge/ai/' + wf.key] = LEGACY['ai/' + wf.key] = 'local ai/' + wf.key;
+  LG.registerNodeType('local ai/' + wf.key, Node);
 }
 
 // ── Viewer ────────────────────────────────────────────────────────────────────
@@ -1454,20 +1742,35 @@ SaveNode.prototype.evaluate = function () {};
 SaveNode.prototype.onConfigure = function () { setWidget(this, 'name', this.properties.name); };
 
 // ── Sequence → Video ───────────────────────────────────────────────────────────
+// `length` = 'drawing clip' takes the frame count from the Drawing nodes in the graph
+// (the longest clip × fps), so an export is exactly one loop of the drawing.
+// `export` picks what's kept: the PNG frames, the encoded mp4, or both.
+const SEQ_DEFAULTS = { name: 'graph_seq', fps: 24, frames: 48, length: 'frames', export: 'frames + video' };
 function SequenceNode() {
   this.addInput('image', IMG);
-  this.properties = { name: 'graph_seq', fps: 24, frames: 48 };
+  this.properties = Object.assign({}, SEQ_DEFAULTS);
+  this.addWidget('text', 'name', this.properties.name, (v) => { this.properties.name = (v || '').trim() || 'graph_seq'; RT.requestSave(); });
   this.addWidget('number', 'fps', this.properties.fps, (v) => { this.properties.fps = Math.round(v); RT.requestSave(); }, { min: 1, max: 60, step: 1 });
+  this.addWidget('combo', 'length', this.properties.length, (v) => { this.properties.length = v; RT.requestSave(); }, { values: ['frames', 'drawing clip'] });
   this.addWidget('number', 'frames', this.properties.frames, (v) => { this.properties.frames = Math.round(v); RT.requestSave(); }, { min: 1, max: 3600, step: 1 });
-  this.addWidget('button', 'Render sequence', null, () => this._render());
-  this.addWidget('button', 'Make video', null, () => this._video());
-  this.size = [220, 140];
+  this.addWidget('combo', 'export', this.properties.export, (v) => { this.properties.export = v; RT.requestSave(); }, { values: ['frames', 'video', 'frames + video'] });
+  this.addWidget('button', '● Render', null, () => this._render());
+  this.addWidget('button', 'Make video from frames', null, () => this._video());
+  this.size = this.computeSize(); this.size[0] = Math.max(230, this.size[0]); this.size[1] += 16;
 }
 SequenceNode.title = 'Sequence → Video';
+SequenceNode.prototype._frameCount = function () {
+  const fps = this.properties.fps || 24;
+  if (this.properties.length === 'drawing clip') {
+    const clips = (RT.graph._nodes || []).filter((n) => n.clipLength).map((n) => n.clipLength());
+    if (clips.length) return Math.max(1, Math.round(Math.max(...clips) * fps));
+  }
+  return Math.max(1, this.properties.frames | 0);
+};
 SequenceNode.prototype._render = async function () {
   const probe = this.getInputData(0);
   if (!probe || !probe.tex) return RT.toast('Connect an image', 'bad');
-  const n = this.properties.frames, name = this.properties.name;
+  const n = this._frameCount(), name = this.properties.name;
   const fps = this.properties.fps || 24;
   const savedTime = RT.time;
   RT.capturing = true;          // the rAF loop yields; we own time + eval here
@@ -1475,6 +1778,8 @@ SequenceNode.prototype._render = async function () {
   try {
     RT.engine.resetSim();                       // reseed all feedback sims
     RT.engine.resetStateBuffer();
+    RT.engine.resetHistory();                   // and trails, so a drawing's feedback starts clean
+    for (const node of RT.graph._nodes || []) if (node.resetClip) node.resetClip();
     await RT.api.seqClear(RT.project, name);
     for (let i = 0; i < n; i++) {
       RT.time = i / fps;                        // advance time so animated shaders move
@@ -1485,9 +1790,18 @@ SequenceNode.prototype._render = async function () {
       await RT.api.seqFrame(RT.project, name, i, blob);
       this._status = `frame ${i + 1}/${n}`; RT.redraw();
     }
-    await RT.api.videoCommand(RT.project, name, this.properties.fps);
     this._status = `rendered ${n} frames`;
-    RT.toast(`Rendered ${n} frames`, 'good');
+    RT.capturing = false;
+    const mode = this.properties.export || 'frames + video';
+    if (mode === 'frames') { await RT.api.videoCommand(RT.project, name, fps); RT.toast(`Rendered ${n} frames`, 'good'); }
+    else {
+      this._status = 'encoding…'; RT.redraw();
+      const ok = await this._video();
+      // video only: the frames were just the encoder's input
+      if (ok && mode === 'video') await RT.api.seqClear(RT.project, name);
+      this._status = ok ? (mode === 'video' ? 'video done' : `${n} frames + video`) : 'ffmpeg failed';
+    }
+    RT.redraw();
   } catch (e) { RT.toast('Sequence failed: ' + e.message, 'bad'); }
   finally { RT.capturing = false; RT.time = savedTime; }
 };
@@ -1496,10 +1810,20 @@ SequenceNode.prototype._video = async function () {
     const res = await RT.api.videoMake(RT.project, this.properties.name, this.properties.fps);
     RT.toast(res.ok ? 'Video: ' + res.out : 'ffmpeg failed (see log)', res.ok ? 'good' : 'bad');
     if (!res.ok) console.warn(res.log);
-  } catch (e) { RT.toast('Video failed: ' + e.message, 'bad'); }
+    return !!res.ok;
+  } catch (e) { RT.toast('Video failed: ' + e.message, 'bad'); return false; }
 };
 SequenceNode.prototype.evaluate = function () {};
-SequenceNode.prototype.onConfigure = function () { setWidget(this, 'fps', this.properties.fps); setWidget(this, 'frames', this.properties.frames); };
+SequenceNode.prototype.onConfigure = function () {
+  for (const k in SEQ_DEFAULTS) if (this.properties[k] === undefined) this.properties[k] = SEQ_DEFAULTS[k];
+  for (const k of ['name', 'fps', 'length', 'frames', 'export']) setWidget(this, k, this.properties[k]);
+};
+// the node face shows progress / the result
+SequenceNode.prototype.onDrawForeground = function (ctx) {
+  if (this.flags.collapsed || !this._status) return;
+  ctx.fillStyle = '#8a929c'; ctx.font = '10px sans-serif';
+  ctx.fillText(this._status, 8, this.size[1] - 6);
+};
 
 // ── Math node (one per file in /mathnodes; outputs floats to drive shader pins) ──
 function makeMathNode(item) {
@@ -1747,12 +2071,15 @@ export function registerNodes() {
   LG.registerNodeType(T.SLIDER, SliderNode);
   LG.registerNodeType(T.NUMBER, NumberNode);
   LG.registerNodeType(T.TOGGLE, ToggleNode);
-  LG.registerNodeType(T.DEPTH, DepthNode);
+  LG.registerNodeType(T.DEPTH, LocalDepthNode);
+  LG.registerNodeType(T.CLOUD_DEPTH, CloudDepthNode);
+  LG.registerNodeType(T.GENERATE, GenerateNode);
   LG.registerNodeType(T.VIEWER, ViewerNode);
   LG.registerNodeType(T.VIEWER_WINDOW, ViewerWindowNode);
   LG.registerNodeType(T.SAVE, SaveNode);
   LG.registerNodeType(T.SEQUENCE, SequenceNode);
   LG.registerNodeType(T.PASS_THROUGH, PassThroughNode);
+  registerDrawingNode({ THUMB_H, attachThumb, sizeWithThumb, ensureOut, nodeRenderSize });
   for (const def of RT.shaderDefs) {
         if (def.pipeline) {
             makePipelineNode(def);

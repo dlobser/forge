@@ -127,7 +127,12 @@ function controlRow(node, w, label) {
 // become a dropdown rather than a row of canvases: two 500px canvases side by side
 // don't fit a phone, and rendering the ones you aren't looking at is wasted GPU.
 // On a wide screen the controls move into a column beside the viewer instead.
-export function buildEndUserUI(root, config, graph) {
+//
+// `opts.actions`: extra buttons/links the host page wants in the viewer's action row
+// (play.js adds Edit and the ChatGPT key button). They go IN the row, before ⬇ / ⤢,
+// rather than floating over the corner — a fixed-position Edit button used to sit
+// right on top of the save and fullscreen buttons.
+export function buildEndUserUI(root, config, graph, opts = {}) {
   injectStyle();
   root.innerHTML = '';
   const wrap = document.createElement('div'); wrap.className = 'eu-wrap';
@@ -157,7 +162,7 @@ export function buildEndUserUI(root, config, graph) {
   };
   const saveBtn = mkBtn('⬇', 'Save this image as a PNG');
   const fsBtn = mkBtn('⤢', 'Fullscreen (keeps playing)');
-  actions.append(saveBtn, fsBtn);
+  actions.append(...(opts.actions || []), saveBtn, fsBtn);
   topbar.append(titleEl, select, actions);
 
   const box = document.createElement('div'); box.className = 'eu-canvasbox';
@@ -263,10 +268,15 @@ function injectStyle() {
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .eu-viewsel{ background:#0d0f12; color:inherit; border:1px solid var(--eu-line,#262b33);
     border-radius:6px; padding:5px 7px; max-width:45%; font-size:12px; }
-  .eu-actions{ display:flex; gap:6px; }
+  .eu-actions{ display:flex; gap:6px; flex:0 0 auto; }
   .eu-iconbtn{ background:#1c2028; color:var(--eu-text,#e6e8ea); border:1px solid var(--eu-line,#262b33);
     border-radius:7px; min-width:36px; height:32px; font-size:15px; cursor:pointer; line-height:1; }
   .eu-iconbtn:disabled{ opacity:.5; cursor:default; }
+  .eu-iconbtn:hover{ border-color:var(--eu-accent,#5b8cff); }
+  /* text buttons (Edit, AI) sharing the row with the icon ones */
+  .eu-textbtn{ display:inline-flex; align-items:center; justify-content:center; padding:0 11px;
+    font-size:13px; text-decoration:none; white-space:nowrap; }
+  .eu-iconbtn.on{ border-color:var(--eu-accent,#5b8cff); color:#fff; }
   .eu-canvasbox{ display:flex; align-items:center; justify-content:center; width:100%;
     height:min(52vh, 62vw); background:#000; border:1px solid var(--eu-line,#262b33); border-radius:10px;
     overflow:hidden; }

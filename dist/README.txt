@@ -13,7 +13,9 @@ S3+CloudFront, GitHub Pages. It works at a domain root or under a subpath
 math-node paths are resolved against the build's own location at runtime,
 not against the origin.
 
-GitHub Pages: serve it from a branch's / or /docs (dist/ is not a source
+GitHub Pages: the repo's .github/workflows/pages.yml builds and deploys
+this on every push to main (Settings > Pages > Source: GitHub Actions).
+Serving a branch instead? Use its / or /docs (dist/ is not a source
 folder Pages offers), and keep the .nojekyll file — without it Jekyll
 strips shaders/_fullscreen.vert and every shader fails to compile. The
 _headers file is a Netlify/Cloudflare thing; Pages ignores it, so expect

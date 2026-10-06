@@ -8,80 +8,23 @@ import { ShaderEngine } from './engine.js';
 import { api } from '../../js/api.js';
 import { RT } from './runtime.js';
 import { registerNodes } from './nodes.js';
+import { loadShaderDefs, normalizeDefs, loadMathDefs, evalOnce } from './boot.js';
 import {
   carryGraphInto, confirmProjectSwitch, doc, initFileMenu, markDirty, save, updateTitle,
 } from './filemenu.js';
 import { askText } from './ui.js';
 import { openHelp } from './help.js';
+import { openCloudDialog, cloudSummary, onCloudChange, mountCloudIndicator } from './cloudai.js';
 
 const LG = window.LiteGraph;
 const $ = (id) => document.getElementById(id);
 let t0 = performance.now();
-
-// See boot.js for why this exists: the API bakes/serves shader & math-node paths
-// as root-absolute strings, which break under a subfolder-mounted static build
-// (and can't be fixed by the fetch shim, since dynamic import() bypasses it).
-const SITE_ROOT = new URL('../../../', import.meta.url);
-const siteURL = (absPath) => new URL(absPath.replace(/^\//, ''), SITE_ROOT);
 
 // ── toast ──────────────────────────────────────────────────────────────────────
 function toast(msg, kind) {
   const box = $('toast'); const el = document.createElement('div');
   el.className = 't' + (kind ? ' ' + kind : ''); el.textContent = msg;
   box.appendChild(el); setTimeout(() => el.remove(), 3000);
-}
-
-// ── shader defs (mirror of state.loadShaderDefs) ───────────────────────────────
-async function loadShaderDefs() {
-  const { shaders } = await api.shaders();
-  const defVert = await (await fetch(siteURL('/shaders/_fullscreen.vert'))).text();
-  const defs = [];
-  for (const s of shaders) {
-    try {
-      const mod = await import(siteURL(s.js).href + '?t=' + Date.now());
-      const def = mod.default || {};
-      const fragSrc = s.frag ? await (await fetch(siteURL(s.frag))).text() : '';
-      const vertSrc = s.vert ? await (await fetch(siteURL(s.vert))).text() : defVert;
-      defs.push({ key: s.key, def, vertSrc, fragSrc });
-    } catch (e) { console.warn('shader load failed', s.key, e); }
-  }
-  return defs.map((d) => ({ key: d.key, vertSrc: d.vertSrc, fragSrc: d.fragSrc, ...d.def, def: d.def }));
-}
-
-// flatten so nodes read def.inputs/controls/feedback directly but keep .key/src
-function normalizeDefs(raw) {
-  return raw.map((d) => ({
-    key: d.key, name: d.def.name, category: d.def.category, vertSrc: d.vertSrc, fragSrc: d.fragSrc,
-    inputs: d.def.inputs, inputLabels: d.def.inputLabels, inputDefaults: d.def.inputDefaults,
-    controls: d.def.controls, feedback: d.def.feedback, history: d.def.history,
-    animated: d.def.animated, simSize: d.def.simSize, simSizes: d.def.simSizes,
-    simBuffers: d.def.simBuffers, simPasses: d.def.simPasses, outputs: d.def.outputs, pipeline: d.def.pipeline, updateVert: d.def.updateVert, updateFrag: d.def.updateFrag, renderVert: d.def.renderVert, renderFrag: d.def.renderFrag, stateBuffers: d.def.stateBuffers,
-    blend: d.def.blend, blendControl: d.def.blendControl,
-    sizeLabel: d.def.sizeLabel, resetLabel: d.def.resetLabel,
-  }));
-}
-
-// scan /mathnodes and import each manifest (same pattern as shaders)
-async function loadMathDefs() {
-  let list = [];
-  try { list = (await (await fetch('/api/mathnodes')).json()).mathnodes || []; } catch (e) { return []; }
-  const defs = [];
-  for (const m of list) {
-    try { const mod = await import(siteURL(m.js).href + '?t=' + Date.now()); defs.push({ key: m.key, def: mod.default || {} }); }
-    catch (e) { console.warn('math node load failed', m.key, e); }
-  }
-  return defs;
-}
-
-// ── evaluation (one topological pass) ──────────────────────────────────────────
-function evalOnce(advance) {
-  const order = RT.graph.computeExecutionOrder(false, false);
-  for (const n of order) {
-    if (n.evaluate) { try { n.evaluate(RT); } catch (e) { console.error('node error', n.title, e); } }
-    // bundled litegraph nodes use onExecute() instead of Forge's evaluate(RT);
-    // running them here lets curated built-ins flow numbers into shader pins
-    else if (n.onExecute) { try { n.onExecute(); } catch (e) {} }
-  }
 }
 
 // ── graph persistence ───────────────────────────────────────────────────────────
@@ -257,6 +200,12 @@ function resizeCanvas(canvas) {
   const rsSel = $('defaultRenderSize');
   rsSel.value = String(RT.RENDER_SIZE);
   rsSel.onchange = () => { RT.RENDER_SIZE = +rsSel.value || 512; localStorage.setItem('forge.graph.renderSize', String(RT.RENDER_SIZE)); toast('Default render size: ' + RT.RENDER_SIZE); };
+  // Cloud AI nodes: provider (ChatGPT / Gemini) + keys live in this browser only
+  const syncCloud = () => { $('cloudHint').textContent = cloudSummary(); };
+  $('cloudBtn').onclick = () => openCloudDialog();
+  onCloudChange(() => { syncCloud(); toast('Cloud AI: ' + cloudSummary(), 'good'); });
+  syncCloud();
+  mountCloudIndicator({ where: 'top' });
 
   $('helpBtn').onclick = () => openHelp();
 
