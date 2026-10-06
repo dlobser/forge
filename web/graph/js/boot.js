@@ -1,8 +1,8 @@
-// boot.js — shared loaders for booting the Forge Graph runtime. These are the same
-// routines graphApp.js uses to populate RT (shader/math defs) and to evaluate the
-// graph each frame. They are duplicated here (rather than imported from graphApp,
-// which is an IIFE that boots the editor) so the published page can reuse them
-// without dragging in the editor; a later refactor can have graphApp import these.
+// boot.js — shared loaders for booting the Forge Graph runtime: the shader/math
+// defs that populate RT, and the per-frame evaluation pass. Both the editor
+// (graphApp.js) and the published page (play.js) import these. They used to keep
+// separate copies, and the published page's copy fell behind — it dropped the GPU
+// pipeline fields, so GPU Particles broke there and only there.
 // relative specifier: resolves against THIS file's own URL (web/graph/js/), not
 // wherever the page happens to be mounted, so it works under any subfolder
 import { api } from '../../js/api.js';
@@ -17,7 +17,7 @@ import { RT } from './runtime.js';
 // module's own URL (import.meta.url), which sits at the same fixed depth under the
 // site root in every deployment (desktop, static root, or static subfolder).
 const SITE_ROOT = new URL('../../../', import.meta.url);
-const siteURL = (absPath) => new URL(absPath.replace(/^\//, ''), SITE_ROOT);
+export const siteURL = (absPath) => new URL(absPath.replace(/^\//, ''), SITE_ROOT);
 
 // scan /api/shaders, import each manifest, fetch its frag/vert sources
 export async function loadShaderDefs() {
@@ -36,15 +36,12 @@ export async function loadShaderDefs() {
   return defs.map((d) => ({ key: d.key, vertSrc: d.vertSrc, fragSrc: d.fragSrc, ...d.def, def: d.def }));
 }
 
-// flatten so nodes read def.inputs/controls/feedback directly but keep .key/src
+// Flatten so nodes read def.inputs / def.controls / def.pipeline… directly, keeping
+// .key and the loaded sources. Every manifest field comes through: a hand-kept list
+// of fields is how the pipeline ones went missing, and a new manifest field
+// shouldn't need a change here to reach its node.
 export function normalizeDefs(raw) {
-  return raw.map((d) => ({
-    key: d.key, name: d.def.name, category: d.def.category, vertSrc: d.vertSrc, fragSrc: d.fragSrc,
-    inputs: d.def.inputs, inputLabels: d.def.inputLabels, inputDefaults: d.def.inputDefaults,
-    controls: d.def.controls, feedback: d.def.feedback, history: d.def.history,
-    animated: d.def.animated, simSize: d.def.simSize, simSizes: d.def.simSizes,
-    simBuffers: d.def.simBuffers, simPasses: d.def.simPasses, outputs: d.def.outputs,
-  }));
+  return raw.map((d) => ({ ...d.def, key: d.key, vertSrc: d.vertSrc, fragSrc: d.fragSrc }));
 }
 
 // scan /mathnodes and import each manifest

@@ -8,6 +8,7 @@ import { loadImage } from './engine.js';
 import { downloadTexture, openLiveView } from './liveview.js';
 import { addShaderWidgets, addSingleShaderWidget, addAiWidgets, syncShaderWidgets, markDirty, openTextEditor } from './widgets.js';
 import { registerDrawingNode } from './drawing.js';
+import { siteURL } from './boot.js';
 import { cloud, cloudDepth, cloudGenerate, askForKey, openCloudDialog, onCloudChange, elapsed } from './cloudai.js';
 
 const LG = window.LiteGraph;
@@ -721,13 +722,83 @@ CropScaleNode.prototype.evaluate = function () {
 };
 CropScaleNode.prototype.onDblClick = function () { if (this._out && this._out.tex) openFull(this); };
 
+// ── pin ↔ slider (shader and pipeline nodes) ───────────────────────────────────
+// Any numeric control can trade its slider for an input pin, so a math node or a
+// slider elsewhere can drive it: right-click ▸ Input Modes. The choice lives in
+// properties.pinModes; the pin itself is saved with the graph like any input.
+const pinnableControls = (def) => (def.controls || []).filter((c) => c.type === 'range' || c.type === 'number' || c.type === 'bool');
+
+// after a load: drop the slider of each pinned control and tag its restored pin
+function restorePins(node, pinnable) {
+  const modes = node.properties.pinModes = node.properties.pinModes || {};
+  for (const c of pinnable) {
+    const inpIdx = (node.inputs || []).findIndex((s) => s.name === c.label && s.type === 'number');
+    if (modes[c.uniform] === 'pin') {
+      const wIdx = (node.widgets || []).findIndex((w) => w._uniform === c.uniform);
+      if (wIdx >= 0) node.widgets.splice(wIdx, 1);
+      if (inpIdx >= 0) node.inputs[inpIdx]._ctrlUniform = c.uniform;
+    } else if (inpIdx >= 0) {
+      // slider mode: remove any leftover pin (backward compat with old saves)
+      node.disconnectInput(inpIdx); node.removeInput(inpIdx);
+    }
+  }
+}
+
+// a pinned control reads its input; a slider control keeps the widget's value
+function applyPins(node, pinnable, params) {
+  const modes = node.properties.pinModes || {};
+  for (const c of pinnable) {
+    if (modes[c.uniform] !== 'pin') continue;
+    const pinIdx = (node.inputs || []).findIndex((s) => s._ctrlUniform === c.uniform);
+    if (pinIdx < 0) continue;
+    const v = node.getInputData(pinIdx);
+    if (typeof v === 'number' && !isNaN(v)) params[c.uniform] = (c.type === 'bool') ? (v > 0.5) : v;
+  }
+  return params;
+}
+
+function togglePin(node, c) {
+  const modes = node.properties.pinModes = node.properties.pinModes || {};
+  if (modes[c.uniform] === 'pin') {
+    modes[c.uniform] = 'slider';
+    const inpIdx = (node.inputs || []).findIndex((s) => s._ctrlUniform === c.uniform);
+    if (inpIdx >= 0) { node.disconnectInput(inpIdx); node.removeInput(inpIdx); }
+    addSingleShaderWidget(node, c);
+  } else {
+    modes[c.uniform] = 'pin';
+    const wIdx = (node.widgets || []).findIndex((w) => w._uniform === c.uniform);
+    if (wIdx >= 0) node.widgets.splice(wIdx, 1);
+    node.addInput(c.label, 'number');
+    node.inputs[node.inputs.length - 1]._ctrlUniform = c.uniform;
+  }
+  sizeWithThumb(node);
+  markDirty(node);
+}
+
+// the right-click "Input Modes" submenu, or null when nothing is pinnable
+function pinMenuItem(node, pinnable) {
+  if (!pinnable.length) return null;
+  const modes = node.properties.pinModes || {};
+  return {
+    content: 'Input Modes',
+    has_submenu: true,
+    callback: function (_v, _opts, e, menu) {
+      const sub = pinnable.map((c) => {
+        const isPin = modes[c.uniform] === 'pin';
+        return { content: (isPin ? '● ' : '○ ') + c.label + (isPin ? '  (pin)' : '  (slider)'), callback: () => togglePin(node, c) };
+      });
+      new LG.ContextMenu(sub, { event: e, parentMenu: menu, title: 'Input Modes' });
+    },
+  };
+}
+
 // ── Shader (one type per scanned shader) ───────────────────────────────────────
 function makeShaderNode(def) {
   // an explicit inputs:[] means a generator (no pins); only undefined defaults to color/depth
   const inputs = Array.isArray(def.inputs) ? def.inputs : ['color', 'depth'];
   const labels = def.inputLabels || {};
   // numeric controls also get an optional float input pin (drive them with math nodes)
-  const pinnable = (def.controls || []).filter((c) => c.type === 'range' || c.type === 'number' || c.type === 'bool');
+  const pinnable = pinnableControls(def);
   // A manifest may declare several `outputs` (e.g. Split Channels' R/G/B/A). The
   // node then renders the same program once per slot with uOutput set to its index.
   // Not for stateful shaders: those step their simulation inside the draw, so one
@@ -759,21 +830,7 @@ function makeShaderNode(def) {
   Node.prototype.onConfigure = function () {
     this._dirty = true;
     syncShaderWidgets(this);
-    const modes = this.properties.pinModes = this.properties.pinModes || {};
-    for (const c of pinnable) {
-      if (modes[c.uniform] === 'pin') {
-        // Remove widget (slider) for this control
-        const wIdx = (this.widgets || []).findIndex((w) => w._uniform === c.uniform);
-        if (wIdx >= 0) this.widgets.splice(wIdx, 1);
-        // Tag the restored input so evaluate() can find it
-        const inpIdx = (this.inputs || []).findIndex((s) => s.name === c.label && s.type === 'number');
-        if (inpIdx >= 0) this.inputs[inpIdx]._ctrlUniform = c.uniform;
-      } else {
-        // Slider mode: remove any leftover pin (backward compat with old saves)
-        const inpIdx = (this.inputs || []).findIndex((s) => s.name === c.label && s.type === 'number');
-        if (inpIdx >= 0) { this.disconnectInput(inpIdx); this.removeInput(inpIdx); }
-      }
-    }
+    restorePins(this, pinnable);
   };
 
   Node.prototype.evaluate = function () {
@@ -783,17 +840,7 @@ function makeShaderNode(def) {
       if (h && h.tex) { inTex[name] = h.tex; vers.push(h.version | 0); } else vers.push(-1);
     });
     // resolve params: a pin-mode control reads from its input; slider-mode uses the widget value
-    const params = Object.assign({}, this.properties.params);
-    const modes = this.properties.pinModes || {};
-    pinnable.forEach((c) => {
-      if (modes[c.uniform] === 'pin') {
-        const pinIdx = (this.inputs || []).findIndex((s) => s._ctrlUniform === c.uniform);
-        if (pinIdx >= 0) {
-          const v = this.getInputData(pinIdx);
-          if (typeof v === 'number' && !isNaN(v)) params[c.uniform] = (c.type === 'bool') ? (v > 0.5) : v;
-        }
-      }
-    });
+    const params = applyPins(this, pinnable, Object.assign({}, this.properties.params));
     const feedback = !!def.feedback;
     const history = !!def.history;
     // A stateful shader (feedback sim or history buffer) is running a simulation, so
@@ -855,7 +902,6 @@ function makeShaderNode(def) {
   // ── right-click menu: render size, plus pin ↔ slider per control ──
   Node.prototype.getExtraMenuOptions = function () {
     const node = this;
-    const modes = this.properties.pinModes || {};
     const current = this._size || nodeRenderSize(this);
     const items = [{
       content: 'Render size: ' + current.width + ' × ' + current.height,
@@ -875,46 +921,12 @@ function makeShaderNode(def) {
         });
       }
     }];
-    if (pinnable.length) items.push({
-      content: 'Input Modes',
-      has_submenu: true,
-      callback: function (_v, _opts, e, menu) {
-        const sub = pinnable.map((c, j) => {
-          const isPin = modes[c.uniform] === 'pin';
-          return { content: (isPin ? '● ' : '○ ') + c.label + (isPin ? '  (pin)' : '  (slider)'), callback: function () { node._togglePinMode(j); } };
-        });
-        new LG.ContextMenu(sub, { event: e, parentMenu: menu, title: 'Input Modes' });
-      }
-    });
+    const pins = pinMenuItem(node, pinnable);
+    if (pins) items.push(pins);
     return items;
   };
 
-  if (pinnable.length) {
-    Node.prototype._togglePinMode = function (ctrlIdx) {
-      const c = pinnable[ctrlIdx];
-      const modes = this.properties.pinModes = this.properties.pinModes || {};
-      const isPin = modes[c.uniform] === 'pin';
-      if (isPin) {
-        // Pin → Slider: remove pin, add widget
-        modes[c.uniform] = 'slider';
-        const inpIdx = (this.inputs || []).findIndex((s) => s._ctrlUniform === c.uniform);
-        if (inpIdx >= 0) { this.disconnectInput(inpIdx); this.removeInput(inpIdx); }
-        addSingleShaderWidget(this, c);
-      } else {
-        // Slider → Pin: remove widget, add pin
-        modes[c.uniform] = 'pin';
-        const wIdx = (this.widgets || []).findIndex((w) => w._uniform === c.uniform);
-        if (wIdx >= 0) this.widgets.splice(wIdx, 1);
-        this.addInput(c.label, 'number');
-        this.inputs[this.inputs.length - 1]._ctrlUniform = c.uniform;
-      }
-      // recalculate size
-      this.size = this.computeSize();
-      if (this.size[0] < 210) this.size[0] = 210;
-      this.size[1] += THUMB_H;
-      markDirty(this);
-    };
-  }
+  Node.prototype._togglePinMode = function (ctrlIdx) { togglePin(this, pinnable[ctrlIdx]); };
 
   // Category comes from the shader's own manifest, so a new shader files itself.
   const type = (def.category || 'effect') + '/' + def.key;
@@ -963,7 +975,7 @@ function loadPipelineSources(def) {
 
     const promise = Promise.all(files.map(async (file) => {
         if (!file) throw new Error('Incomplete pipeline declaration for ' + def.key);
-        const res = await fetch('/shaders/' + file);
+        const res = await fetch(siteURL('/shaders/' + file));
         if (!res.ok) throw new Error('Could not load pipeline shader: ' + file);
         return res.text();
     })).then(([updateVertSrc, updateFragSrc, renderVertSrc, renderFragSrc]) => ({
@@ -980,6 +992,7 @@ function loadPipelineSources(def) {
 function makePipelineNode(def) {
     const pipeline = pipelineFromDef(def);
     const controls = def.controls || [];
+    const pinnable = pinnableControls(def);
     const inputs = Array.isArray(def.inputs) ? def.inputs : [];
     const labels = def.inputLabels || {};
     const controlValue = (params, uniform) => {
@@ -1013,8 +1026,10 @@ function makePipelineNode(def) {
     function Node() {
         for (const name of inputs) this.addInput(labels[name] || name, IMG);
         this.addOutput('out', IMG);
+        // numeric controls can be swapped for input pins (right-click ▸ Input Modes)
         this.properties = {
             params: {},
+            pinModes: {},
             simSize: pipeline.stateSize || 64,
         };
 
@@ -1075,6 +1090,7 @@ function makePipelineNode(def) {
         this.properties.params = this.properties.params || {};
         setWidget(this, pipeline.sizeLabel || 'state grid', this.properties.simSize);
         syncShaderWidgets(this);
+        restorePins(this, pinnable);
         this._dirty = true;
     };
 
@@ -1082,7 +1098,7 @@ function makePipelineNode(def) {
         const sources = this._pipelineSources;
         if (!sources) return;
 
-        const params = Object.assign({}, this.properties.params);
+        const params = applyPins(this, pinnable, Object.assign({}, this.properties.params));
         const inTex = {};
         const versions = [];
         inputs.forEach((name, i) => {
@@ -1190,7 +1206,7 @@ function makePipelineNode(def) {
         const node = this;
         const current = this._size || nodeRenderSize(this);
 
-        return [{
+        const items = [{
             content: 'Render size: ' + current.width + ' × ' + current.height,
             has_submenu: true,
             callback: function (_v, _opts, e, menu) {
@@ -1228,7 +1244,12 @@ function makePipelineNode(def) {
                 });
             },
         }];
+        const pins = pinMenuItem(node, pinnable);
+        if (pins) items.push(pins);
+        return items;
     };
+
+    Node.prototype._togglePinMode = function (ctrlIdx) { togglePin(this, pinnable[ctrlIdx]); };
 
     const type = (def.category || 'generate') + '/' + def.key;
     LEGACY['forge/shader/' + def.key] = type;
