@@ -249,6 +249,13 @@ function sizeWithThumb(node) {
   node.size[1] += THUMB_H;
 }
 
+// After a load: a saved size predates any pin or control the manifest has gained
+// since, so the thumbnail would cover the newest widgets. Grow to fit; never shrink.
+function growToFit(node) {
+  const h = node.computeSize()[1] + THUMB_H;
+  if (node.size[1] < h) node.size[1] = h;
+}
+
 // ── busy overlay: a spinner + clock over the thumbnail while a slow job runs ─────
 // A cloud image takes ten seconds to a couple of minutes and reports no progress, so
 // the node says it's working — and for how long — rather than sitting there looking
@@ -729,10 +736,22 @@ CropScaleNode.prototype.onDblClick = function () { if (this._out && this._out.te
 // Pin names come from the manifest, not the saved graph. Litegraph restores the
 // slots a graph was saved with, so without this a renamed pin (Blend's color/depth
 // becoming A/B) would keep its old name in every existing graph and share link.
+// The same goes for a pin the manifest gained since the save (Blend's Mask): if a
+// control pin now sits where it belongs, the image pin is inserted in front of it
+// and the links into the shifted pins are re-pointed at their new slots.
 function relabelInputs(node, inputs, labels) {
+  node.inputs = node.inputs || [];
   inputs.forEach((name, i) => {
-    const s = node.inputs && node.inputs[i];
-    if (s && s.type === IMG) s.name = labels[name] || name;
+    let s = node.inputs[i];
+    if (!s || s.type !== IMG) {
+      s = { name, type: IMG, link: null };
+      node.inputs.splice(i, 0, s);
+      for (let j = i + 1; j < node.inputs.length; j++) {
+        const link = node.graph && node.graph.links[node.inputs[j].link];
+        if (link) link.target_slot = j;
+      }
+    }
+    s.name = labels[name] || name;
   });
 }
 
@@ -842,6 +861,7 @@ function makeShaderNode(def) {
     syncShaderWidgets(this);
     relabelInputs(this, inputs, labels);
     restorePins(this, pinnable);
+    growToFit(this);
   };
 
   Node.prototype.evaluate = function () {
@@ -1103,6 +1123,7 @@ function makePipelineNode(def) {
         syncShaderWidgets(this);
         relabelInputs(this, inputs, labels);
         restorePins(this, pinnable);
+        growToFit(this);
         this._dirty = true;
     };
 

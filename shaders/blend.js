@@ -1,16 +1,21 @@
 // blend — composite two images with a selectable blend mode.
 //
-//   A → the base image   (sampled as uColor)
-//   B → blended on top   (sampled as uDepth)
+//   A    → the base image   (sampled as uColor)
+//   B    → blended on top   (sampled as uDepth)
+//   Mask → where the blend applies (sampled as uMask): white blends, black keeps
+//          the base, grey is in between. Unconnected reads white, so the whole
+//          frame blends.
 //
 // Mix fades between the base and the blended result; Swap flips which image is
-// the base (matters for the non-symmetric modes like Overlay).
+// the base (matters for the non-symmetric modes like Overlay). Invert Mask
+// blends where the mask is dark instead.
 export default {
   name: "Blend",
   category: "image",
   animated: false,
-  inputs: ["color", "depth"],
-  inputLabels: { color: "A", depth: "B" },
+  inputs: ["color", "depth", "mask"],
+  inputLabels: { color: "A", depth: "B", mask: "Mask" },
+  inputDefaults: { mask: "white" },
   controls: [
     { uniform: "uMode", label: "Mode", type: "select", value: 0, options: [
       { value: 0, label: "Add" },
@@ -21,5 +26,6 @@ export default {
     ] },
     { uniform: "uMix",  label: "Mix",  type: "range", min: 0, max: 1, step: 0.01, value: 1 },
     { uniform: "uSwap", label: "Swap A/B", type: "bool", value: false },
+    { uniform: "uMaskInvert", label: "Invert Mask", type: "bool", value: false },
   ],
 };
