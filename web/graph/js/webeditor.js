@@ -16,6 +16,7 @@
 // exist by the time it runs (it still waits for RT.graph to be built).
 import { RT } from './runtime.js';
 import { decodeGraph, readHash } from './share.js';
+import { doc, fileMenuReady, updateTitle } from './filemenu.js';
 import { BTN_PRIMARY, h, modal, title, toast } from './ui.js';
 
 const $ = (id) => document.getElementById(id);
@@ -92,9 +93,11 @@ async function adoptGraph(graph, name) {
   const store = window.ForgeStore;
   try {
     await store.api.createProject(name);      // also makes it the current project
-    await store.saveGraph(name, graph);
+    await store.saveGraph(name, graph);       // as the new project's first document
   } catch (e) { /* fall through and at least display it */ }
   RT.project = name;
+  // autosave writes to doc.name, which still names whatever was open before
+  doc.name = 'Untitled'; updateTitle();
   RT.graph.clear();
   try { RT.graph.configure(graph); } catch (e) { console.error('graph configure failed', e); }
   await RT.refreshGallery();
@@ -128,6 +131,7 @@ async function init() {
   b.className = 'btn'; b.textContent = '?'; b.title = 'Help'; b.onclick = openHelp;
   bar.insertBefore(b, anchor);
 
+  await fileMenuReady;
   await maybeFork();
 
   if (!localStorage.getItem('forge.web.helpSeen')) {
