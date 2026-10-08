@@ -1,8 +1,9 @@
 Static export of the Forge Graph EDITOR (web build).
 
 Each visitor gets a private workspace in their own browser (IndexedDB).
-Nothing is uploaded; there is no server and no shared state. Depth, AI
-and video nodes are disabled - they need ComfyUI/ffmpeg locally.
+Nothing is uploaded; there is no server and no shared state. Local AI
+nodes are disabled - they need ComfyUI locally. Sequence -> Video
+encodes in the browser and downloads an mp4 or a zip of frames.
 
 index.html  the node editor
 play.html   the visitor's own authored UI, from their browser storage

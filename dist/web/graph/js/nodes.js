@@ -1783,17 +1783,30 @@ SaveNode.prototype.onConfigure = function () { setWidget(this, 'name', this.prop
 // particle system and drawing clip and starts the clock at 0.
 const SEQ_START = ['where it is', 'reset first'];
 const SEQ_DEFAULTS = { name: 'graph_seq', fps: 24, frames: 48, length: 'frames', start: SEQ_START[0], export: 'frames + video' };
+// The web build has no server and no ffmpeg (window.ForgeStore is its browser-local
+// backend), so there the same three `export` values download an mp4 and/or a zip of
+// PNGs instead (videoexport.js). The combo shows what you'll get; the stored value is
+// the same in both builds, so a graph means the same thing in either.
+const SEQ_WEB = typeof window !== 'undefined' && !!window.ForgeStore;
+const SEQ_EXPORTS = SEQ_WEB
+  ? [['video', 'mp4'], ['frames', 'zipped frames'], ['frames + video', 'zip: frames + mp4']]
+  : [['frames', 'frames'], ['video', 'video'], ['frames + video', 'frames + video']];
+const seqExportLabel = (v) => (SEQ_EXPORTS.find((e) => e[0] === v) || SEQ_EXPORTS[0])[1];
 function SequenceNode() {
   this.addInput('image', IMG);
-  this.properties = Object.assign({}, SEQ_DEFAULTS);
+  this.properties = Object.assign({}, SEQ_DEFAULTS, SEQ_WEB ? { export: 'video' } : {});
   this.addWidget('text', 'name', this.properties.name, (v) => { this.properties.name = (v || '').trim() || 'graph_seq'; RT.requestSave(); });
   this.addWidget('number', 'fps', this.properties.fps, (v) => { this.properties.fps = Math.round(v); RT.requestSave(); }, { min: 1, max: 60, step: 1 });
   this.addWidget('combo', 'length', this.properties.length, (v) => { this.properties.length = v; RT.requestSave(); }, { values: ['frames', 'drawing clip'] });
   this.addWidget('number', 'frames', this.properties.frames, (v) => { this.properties.frames = Math.round(v); RT.requestSave(); }, { min: 1, max: 3600, step: 1 });
   this.addWidget('combo', 'start', this.properties.start, (v) => { this.properties.start = v; RT.requestSave(); }, { values: SEQ_START });
-  this.addWidget('combo', 'export', this.properties.export, (v) => { this.properties.export = v; RT.requestSave(); }, { values: ['frames', 'video', 'frames + video'] });
+  this.addWidget('combo', 'export', seqExportLabel(this.properties.export), (label) => {
+    const e = SEQ_EXPORTS.find((x) => x[1] === label);
+    if (e) { this.properties.export = e[0]; RT.requestSave(); }
+  }, { values: SEQ_EXPORTS.map((e) => e[1]) });
   this.addWidget('button', '● Render', null, () => this._render());
-  this.addWidget('button', 'Make video from frames', null, () => this._video());
+  // the web build encodes as it renders; there is no folder of frames to come back to
+  if (!SEQ_WEB) this.addWidget('button', 'Make video from frames', null, () => this._video());
   this.size = this.computeSize(); this.size[0] = Math.max(230, this.size[0]); this.size[1] += 16;
 }
 SequenceNode.title = 'Sequence → Video';
@@ -1813,6 +1826,9 @@ SequenceNode.prototype._render = async function () {
   const fresh = this.properties.start === 'reset first';
   const savedTime = RT.time;
   const t0 = fresh ? 0 : RT.time;
+  const mode = this.properties.export || 'frames + video';
+  // web build: frames go straight to an in-browser encoder / zip, downloaded at the end
+  const out = SEQ_WEB ? new (await import('./videoexport.js')).SequenceExport({ name, fps, mode }) : null;
   RT.capturing = true;          // the rAF loop yields; we own time + eval here
   try {
     if (fresh) {
@@ -1821,7 +1837,7 @@ SequenceNode.prototype._render = async function () {
       RT.engine.resetHistory();                 // and trails, so a drawing's feedback starts clean
       for (const node of RT.graph._nodes || []) if (node.resetClip) node.resetClip();
     }
-    await RT.api.seqClear(RT.project, name);
+    if (!out) await RT.api.seqClear(RT.project, name);
     for (let i = 0; i < n; i++) {
       RT.time = t0 + i / fps;                   // advance time so animated shaders move
       RT.dt = 1 / fps;
@@ -1831,14 +1847,24 @@ SequenceNode.prototype._render = async function () {
       RT.advance = fresh || i > 0;
       RT.evalOnce();                            // re-render every node at this time
       const h = this.getInputData(0);
-      const s = imageSize(h); const blob = await RT.engine.captureTexture(h.tex, s.width, s.height);
-      await RT.api.seqFrame(RT.project, name, i, blob);
+      const s = imageSize(h);
+      if (out) {
+        if (i === 0) await out.begin(s.width, s.height);
+        await out.add(RT.engine.captureCanvas(h.tex, s.width, s.height), i);
+      } else {
+        const blob = await RT.engine.captureTexture(h.tex, s.width, s.height);
+        await RT.api.seqFrame(RT.project, name, i, blob);
+      }
       this._status = `frame ${i + 1}/${n}`; RT.redraw();
     }
     this._status = `rendered ${n} frames`;
     RT.capturing = false;
-    const mode = this.properties.export || 'frames + video';
-    if (mode === 'frames') { await RT.api.videoCommand(RT.project, name, fps); RT.toast(`Rendered ${n} frames`, 'good'); }
+    if (out) {
+      this._status = mode === 'frames' ? 'zipping…' : 'encoding…'; RT.redraw();
+      const file = await out.finish();
+      this._status = 'downloaded ' + file;
+      RT.toast('Downloaded ' + file, 'good');
+    } else if (mode === 'frames') { await RT.api.videoCommand(RT.project, name, fps); RT.toast(`Rendered ${n} frames`, 'good'); }
     else {
       this._status = 'encoding…'; RT.redraw();
       const ok = await this._video();
@@ -1847,7 +1873,10 @@ SequenceNode.prototype._render = async function () {
       this._status = ok ? (mode === 'video' ? 'video done' : `${n} frames + video`) : 'ffmpeg failed';
     }
     RT.redraw();
-  } catch (e) { RT.toast('Sequence failed: ' + e.message, 'bad'); }
+  } catch (e) {
+    if (out) { out.abort(); this._status = 'failed'; }
+    RT.toast('Sequence failed: ' + e.message, 'bad');
+  }
   finally {
     RT.capturing = false;
     // carry on from the last recorded frame, so the live graph doesn't jump back
@@ -1865,7 +1894,8 @@ SequenceNode.prototype._video = async function () {
 SequenceNode.prototype.evaluate = function () {};
 SequenceNode.prototype.onConfigure = function () {
   for (const k in SEQ_DEFAULTS) if (this.properties[k] === undefined) this.properties[k] = SEQ_DEFAULTS[k];
-  for (const k of ['name', 'fps', 'length', 'frames', 'start', 'export']) setWidget(this, k, this.properties[k]);
+  for (const k of ['name', 'fps', 'length', 'frames', 'start']) setWidget(this, k, this.properties[k]);
+  setWidget(this, 'export', seqExportLabel(this.properties.export));
 };
 // the node face shows progress / the result
 SequenceNode.prototype.onDrawForeground = function (ctx) {
