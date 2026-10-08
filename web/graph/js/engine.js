@@ -659,6 +659,15 @@ export class ShaderEngine {
     return this._readBlob(width, height);
   }
 
+  // Like captureTexture but hands back a canvas instead of a PNG, for the web
+  // build's video encoder. The same canvas is reused on every call.
+  captureCanvas(tex, width, height = width) {
+    this._ensureCaptureFbo(width, height);
+    this._blit(tex, this.fbo, width, height);
+    this._capCanvas = this._capCanvas || document.createElement('canvas');
+    return this._readCanvas(width, height, this._capCanvas);
+  }
+
   _ensureCaptureFbo(width, height = width) {
     const gl = this.gl, key = width + 'x' + height;
     if (this.fboSize === key) return;
@@ -673,17 +682,24 @@ export class ShaderEngine {
   }
 
   _readBlob(width, height = width) {
+    const c = this._readCanvas(width, height, document.createElement('canvas'));
+    return new Promise((res) => c.toBlob(res, 'image/png'));
+  }
+
+  // the capture FBO's pixels, upright, in a 2D canvas (reused when one is passed)
+  _readCanvas(width, height, c) {
     const gl = this.gl;
     const px = new Uint8Array(width * height * 4);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.fbo);
     gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, px);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    const c = document.createElement('canvas'); c.width = width; c.height = height;
+    if (c.width !== width) c.width = width;
+    if (c.height !== height) c.height = height;
     const ctx = c.getContext('2d'); const img = ctx.createImageData(width, height);
     const row = width * 4;
     for (let y = 0; y < height; y++) img.data.set(px.subarray((height - 1 - y) * row, (height - y) * row), y * row);
     ctx.putImageData(img, 0, 0);
-    return new Promise((res) => c.toBlob(res, 'image/png'));
+    return c;
   }
 }
 

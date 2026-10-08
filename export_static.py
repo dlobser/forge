@@ -433,8 +433,9 @@ def export(mode: str, project: str, dist: Path, all_images: bool, clean: bool) -
     else:
         what = ("Static export of the Forge Graph EDITOR (web build).\n\n"
                 "Each visitor gets a private workspace in their own browser (IndexedDB).\n"
-                "Nothing is uploaded; there is no server and no shared state. Depth, AI\n"
-                "and video nodes are disabled - they need ComfyUI/ffmpeg locally.\n\n"
+                "Nothing is uploaded; there is no server and no shared state. Local AI\n"
+                "nodes are disabled - they need ComfyUI locally. Sequence -> Video\n"
+                "encodes in the browser and downloads an mp4 or a zip of frames.\n\n"
                 "index.html  the node editor\n"
                 "play.html   the visitor's own authored UI, from their browser storage\n")
     (dist / "README.txt").write_text(

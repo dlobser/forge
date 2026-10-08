@@ -12,8 +12,9 @@
 //   static-shim.js  routes fetch('/api/…') here (graphApp saves the graph that way)
 //   api.js          gets `Object.assign(api, ForgeStore.api)` appended at export time
 //
-// Anything needing a GPU or a native binary — ComfyUI depth, AI generate, ffmpeg
-// video — rejects with a readable message that the nodes surface as a toast.
+// Anything needing ComfyUI — local depth, local AI generate — rejects with a readable
+// message that the nodes surface as a toast. The Sequence node doesn't come here for
+// video: in this build it encodes in the browser instead (videoexport.js).
 (function () {
   'use strict';
 

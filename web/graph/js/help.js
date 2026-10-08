@@ -1,7 +1,7 @@
 // help.js — the Help panel. Deliberately short: what the canvas gestures are, what
 // the node categories mean, and the one thing that genuinely confuses people — that
 // the whole editor runs in the browser with no server, and the Python server only
-// exists for the two things a browser cannot do (talk to ComfyUI, run ffmpeg).
+// exists for what a browser cannot do (talk to ComfyUI, hand frames to ffmpeg).
 import { BTN, BTN_PRIMARY, h, modal, title } from './ui.js';
 
 const SECTIONS = [
@@ -48,7 +48,7 @@ const SECTIONS = [
       ['Nothing visual', 'Every shader, the whole node graph, the authored UI and sharing are pure browser WebGL2. A static copy is fully interactive on its own.'],
       ['ComfyUI', 'Local AI nodes talk to ComfyUI on 127.0.0.1:8188. Only reachable from the machine running it.'],
       ['Cloud AI', 'Not these: ⚙ Settings ▸ Cloud AI picks ChatGPT or Gemini (Nano Banana) and takes your API key. They run from the browser, so they work on a published page too (visitors get a ✦ AI button for their own key).'],
-      ['ffmpeg', 'Sequence → Video writes frames to disk and encodes them. Browsers can’t do either.'],
+      ['ffmpeg', 'Sequence → Video writes frames into the project folder and ffmpeg encodes them. In the browser build it encodes the mp4 itself, or zips the frames, and downloads the result.'],
       ['To get those', 'Download the project, run start.bat (or python -m forge_server.server), open 127.0.0.1:8191, then load your graph or share link there.'],
     ],
   },

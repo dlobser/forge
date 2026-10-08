@@ -225,6 +225,14 @@ then ffmpeg encodes `projects/<Name>/videos/<effect>.mp4`. The command template
 lives in Settings (placeholders `{fps} {start} {frames_in} {out}`); the resolved
 command is shown in the effect card and copyable.
 
+The web build has no ffmpeg, so there the **Sequence → Video** node encodes in the
+browser instead (`web/graph/js/videoexport.js`) and downloads the result. Its
+`export` combo reads *mp4* (WebCodecs H.264, muxed by the vendored
+`web/graph/vendor/mp4-muxer.js`), *zipped frames* (`<name>/frame_00000.png` …, the
+desktop's sequence folder layout), or
+*zip: frames + mp4* — the same three stored values as the desktop's *video*,
+*frames* and *frames + video*, so a graph means the same thing in both builds.
+
 In the graph, the **Sequence → Video** node's `start` decides where a render
 begins. *where it is* (the default) records from the graph's current state and
 time: frame 0 is the frame on screen, and simulations, particles, trails and

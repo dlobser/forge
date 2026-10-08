@@ -57,15 +57,15 @@ function openHelp() {
 
     const box = h('div', 'background:#12161c;border:1px solid #262b33;border-radius:9px;padding:12px 14px;margin-bottom:6px');
     box.appendChild(h('div', 'color:#e6e8ea;font-weight:600;margin-bottom:6px',
-      'Multiple graphs, version history, Video & AI'));
+      'Local AI (ComfyUI)'));
     const b2 = h('div', 'color:#8a929c;font-size:12.5px');
-    b2.innerHTML = 'These need the free ' + strong('desktop version') + '. It stores projects '
-      + 'as real folders (so one project can hold many graphs, each with saved versions you can '
-      + 'restore) and runs ' + strong('ComfyUI') + ' (AI + depth) and ' + strong('ffmpeg') + ' '
-      + '(video) on your own machine — a browser can’t do those. Here, each project holds a '
-      + 'single graph and those nodes stay disabled. Grab Forge from the project’s README, run '
-      + strong('start.bat') + ', and use the editor there. Everything else works fully right here — '
-      + 'including the ' + strong('Cloud AI') + ' nodes (Depth, Generate), once you add your own ChatGPT or Gemini key under ⚙ Settings.';
+    b2.innerHTML = 'The ' + strong('Local AI') + ' nodes need the free ' + strong('desktop version')
+      + ', which runs ' + strong('ComfyUI') + ' on your own machine — a browser can’t. Grab Forge '
+      + 'from the project’s README, run ' + strong('start.bat') + ', and use the editor there. '
+      + 'Everything else works fully right here: projects with as many graphs as you like and a '
+      + 'version history for each (' + strong('File') + ' menu), ' + strong('Sequence → Video')
+      + ', which downloads an mp4 or a zip of frames, and the ' + strong('Cloud AI') + ' nodes '
+      + '(Depth, Generate), once you add your own ChatGPT or Gemini key under ⚙ Settings.';
     box.appendChild(b2); card.appendChild(box);
 
     const row = h('div', 'display:flex;justify-content:flex-end;margin-top:16px');
