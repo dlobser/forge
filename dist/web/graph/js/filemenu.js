@@ -537,6 +537,12 @@ function items() {
 }
 
 // ── wire up ──────────────────────────────────────────────────────────────────
+// Settles once doc.name names the document the project opened on. Anything that
+// switches project during boot (webeditor.js forking a share link) waits for it, or
+// this would overwrite its doc.name with the previous project's document.
+let menuReady;
+export const fileMenuReady = new Promise((r) => { menuReady = r; });
+
 export async function initFileMenu() {
   await probe();
 
@@ -550,6 +556,7 @@ export async function initFileMenu() {
     } catch (e) { /* keep the default */ }
   }
   markClean();
+  menuReady();
 
   document.addEventListener('keydown', (e) => {
     if (!(e.ctrlKey || e.metaKey)) return;

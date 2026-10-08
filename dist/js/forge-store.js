@@ -12,14 +12,19 @@
 //   static-shim.js  routes fetch('/api/…') here (graphApp saves the graph that way)
 //   api.js          gets `Object.assign(api, ForgeStore.api)` appended at export time
 //
-// Anything needing a GPU or a native binary — ComfyUI depth, AI generate, ffmpeg
-// video — rejects with a readable message that the nodes surface as a toast.
+// Anything needing ComfyUI — local depth, local AI generate — rejects with a readable
+// message that the nodes surface as a toast. The Sequence node doesn't come here for
+// video: in this build it encodes in the browser instead (videoexport.js).
 (function () {
   'use strict';
 
   var DB_NAME = 'forge-web';
-  var DB_VERSION = 1;
+  // v1 held one graph per project. v2 holds named documents with version history,
+  // the same model as the desktop app's projects/<name>/graphs/ (forge_server/graphs.py).
+  var DB_VERSION = 2;
   var DEFAULT_PROJECT = 'My Project';
+  var DEFAULT_DOC = 'Untitled';
+  var MAX_VERSIONS = 50;           // per document; oldest pruned beyond this
   var IMG_EXTS = ['.png', '.jpg', '.jpeg', '.webp', '.bmp'];
 
   var db = null;
@@ -32,21 +37,55 @@
       what + ' needs the desktop version (it runs ComfyUI/ffmpeg locally)'));
   }
 
+  // An error that handleFetch turns into an HTTP status with a {detail} body, the
+  // shape FastAPI's HTTPException gives the desktop build, so filemenu.js shows the
+  // same message either way.
+  function httpError(status, msg) { var e = new Error(msg); e.status = status; return e; }
+
   // ── IndexedDB plumbing ─────────────────────────────────────────────────────
   function open() {
     return new Promise(function (resolve, reject) {
       var req = indexedDB.open(DB_NAME, DB_VERSION);
       req.onupgradeneeded = function () {
-        var d = req.result;
+        var d = req.result, t = req.transaction;
         if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta', { keyPath: 'k' });
         if (!d.objectStoreNames.contains('projects')) d.createObjectStore('projects', { keyPath: 'name' });
-        if (!d.objectStoreNames.contains('graphs')) d.createObjectStore('graphs', { keyPath: 'project' });
         if (!d.objectStoreNames.contains('images')) {
           var s = d.createObjectStore('images', { keyPath: 'id' });
           s.createIndex('project', 'project', { unique: false });
         }
+        if (!d.objectStoreNames.contains('docs')) {
+          d.createObjectStore('docs', { keyPath: 'id' }).createIndex('project', 'project', { unique: false });
+        }
+        if (!d.objectStoreNames.contains('versions')) {
+          d.createObjectStore('versions', { keyPath: 'id' }).createIndex('doc', 'doc', { unique: false });
+        }
+        // v1's single graph per project becomes that project's "Untitled" document.
+        // Done inside the upgrade transaction, so it either all happens or none does.
+        if (d.objectStoreNames.contains('graphs')) {
+          t.objectStore('graphs').getAll().onsuccess = function (e) {
+            (e.target.result || []).forEach(function (row) {
+              if (!row || !row.graph) return;
+              t.objectStore('docs').put({
+                id: docId(row.project, DEFAULT_DOC), project: row.project,
+                name: DEFAULT_DOC, graph: row.graph, mtime: Date.now(),
+              });
+              t.objectStore('meta').put({ k: 'currentDoc:' + row.project, v: DEFAULT_DOC });
+            });
+            d.deleteObjectStore('graphs');
+          };
+        }
       };
-      req.onsuccess = function () { resolve(req.result); };
+      // another tab still has the old version open; the upgrade waits for it
+      req.onblocked = function () {
+        console.warn('Forge: close other Forge tabs so this one can update its storage');
+      };
+      req.onsuccess = function () {
+        var d = req.result;
+        // let a newer build in another tab upgrade instead of hanging behind us
+        d.onversionchange = function () { d.close(); };
+        resolve(d);
+      };
       req.onerror = function () { reject(req.error); };
     });
   }
@@ -64,6 +103,8 @@
   function put(store, val) { return wrap(tx(store, 'readwrite').put(val)); }
   function del(store, key) { return wrap(tx(store, 'readwrite').delete(key)); }
   function all(store) { return wrap(tx(store, 'readonly').getAll()); }
+  function byIndex(store, index, key) { return wrap(tx(store, 'readonly').index(index).getAll(key)); }
+  function countIndex(store, index, key) { return wrap(tx(store, 'readonly').index(index).count(key)); }
 
   // ── boot: open the db, guarantee one project exists ────────────────────────
   var ready = (async function () {
@@ -79,6 +120,11 @@
   // ── helpers ────────────────────────────────────────────────────────────────
   function slug(s) { return String(s).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'x'; }
   function imgId(project, filename) { return project + '/' + filename; }
+  // a document name never contains '/', so this can't collide across projects
+  function docId(project, name) { return project + '/' + safeName(name); }
+  function body(init) { try { return JSON.parse(init.body); } catch (e) { return {}; } }
+  function hasImageExt(f) { return IMG_EXTS.indexOf((/\.[^.]*$/.exec(f) || [''])[0].toLowerCase()) >= 0; }
+  function baseName(f) { return String(f || '').split(/[\\/]/).pop(); }
 
   async function currentProject() {
     var m = await get('meta', 'currentProject');
@@ -229,68 +275,170 @@
     saveSidecar: async function () { return { ok: true }; },
   };
 
-  // ── graph load/save (graphApp uses raw fetch for these) ────────────────────
-  async function loadGraph(project) {
-    await ready;
-    var row = await get('graphs', project || await currentProject());
-    return (row && row.graph) || {};
-  }
-  async function saveGraph(project, graph) {
-    await ready;
-    await put('graphs', { project: project || await currentProject(), graph: graph });
-    return { ok: true };
+  // ── graph documents (mirrors forge_server/graphs.py) ───────────────────────
+  // A project owns the gallery; graphs are documents inside it, so Save As keeps
+  // Source/Import nodes resolving. Versions are written by explicit saves only —
+  // the 500ms autosave writes the document but never snapshots it.
+  function safeName(name) {
+    name = String(name == null ? '' : name).trim().replace(/[<>:"/\\|?*\x00-\x1f]/g, '');
+    name = name.replace(/^[. ]+|[. ]+$/g, '');
+    return name.slice(0, 80) || DEFAULT_DOC;
   }
 
-  // ── fetch router, used by static-shim.js ───────────────────────────────────
-  // Returns a Response for routes this store owns, or null to let the shim fall
-  // through to the baked /data/*.json (shaders, math nodes, workflow schemas).
-  async function handleFetch(url, init) {
-    var u = new URL(url, location.href);
-    var path = u.pathname;
-    var method = ((init && init.method) || 'GET').toUpperCase();
-    var body = init && init.body;
-    var json = function (o) {
-      return new Response(JSON.stringify(o), { headers: { 'Content-Type': 'application/json' } });
-    };
+  async function getDoc(project, name) { return get('docs', docId(project, name)); }
 
-    if (path === '/api/graph') {
-      if (method === 'GET') return json(await loadGraph(u.searchParams.get('project')));
-      var payload = {};
-      try { payload = JSON.parse(body); } catch (e) {}
-      return json(await saveGraph(payload.project, payload.graph));
-    }
-    if (path === '/api/projects') return json(await api.listProjects());
-    if (path === '/api/project') return json(await api.getProject());
-    if (path === '/api/settings') return json(await api.getSettings());
-    if (path === '/api/gallery') return json(await api.gallery(u.searchParams.get('project')));
-    if (path === '/api/comfy/status') return json(await api.comfyStatus());
-    if (path === '/api/projects/select' || path === '/api/projects/create') {
-      var p = {};
-      try { p = JSON.parse(body); } catch (e) {}
-      var fn = path.endsWith('create') ? api.createProject : api.selectProject;
-      try { return json(await fn(p.name)); }
-      catch (e) { return new Response(e.message, { status: 400 }); }
-    }
-    return null;
+  async function currentDoc(project) {
+    var m = await get('meta', 'currentDoc:' + project);
+    if (m && m.v && await getDoc(project, m.v)) return m.v;
+    var docs = await listDocs(project);
+    return docs.length ? docs[0].name : DEFAULT_DOC;
   }
+  function setCurrentDoc(project, name) { return put('meta', { k: 'currentDoc:' + project, v: safeName(name) }); }
 
-  // ── export / import a graph as a file, so work survives a cleared cache ────
-  async function exportGraph(project) {
-    await ready;
-    project = project || await currentProject();
-    var graph = await loadGraph(project);
-    var images = await projectImages(project);
-    // inline the images so a shared .json is self-contained
-    var payload = { forge: 1, project: project, graph: graph, images: [] };
-    for (var i = 0; i < images.length; i++) {
-      payload.images.push({
-        filename: images[i].filename, kind: images[i].kind,
-        data: await blobToDataURL(images[i].blob),
+  async function listDocs(project) {
+    var rows = await byIndex('docs', 'project', project);
+    var out = [];
+    for (var i = 0; i < rows.length; i++) {
+      out.push({
+        name: rows[i].name, mtime: rows[i].mtime / 1000,
+        size: JSON.stringify(rows[i].graph || {}).length,
+        versions: await countIndex('versions', 'doc', rows[i].id),
       });
     }
-    return payload;
+    out.sort(function (a, b) { return b.mtime - a.mtime; });
+    return out;
   }
 
+  // 'Sketch' -> 'Sketch 2' -> 'Sketch 3' … so Save As never silently clobbers
+  async function uniqueDoc(project, name) {
+    var base = safeName(name);
+    if (!await getDoc(project, base)) return base;
+    var n = 2;
+    while (await getDoc(project, base + ' ' + n)) n++;
+    return base + ' ' + n;
+  }
+
+  async function loadDoc(project, name) {
+    var row = await getDoc(project, name || await currentDoc(project));
+    return (row && row.graph) || {};
+  }
+
+  async function saveDoc(project, name, graph, snapshot, label) {
+    name = safeName(name);
+    await put('docs', { id: docId(project, name), project: project, name: name, graph: graph || {}, mtime: Date.now() });
+    var made = snapshot ? await writeVersion(project, name, graph || {}, label || '') : null;
+    return { ok: true, name: name, version: made };
+  }
+
+  async function deleteDoc(project, name) {
+    var id = docId(project, name);
+    var vs = await byIndex('versions', 'doc', id);
+    for (var i = 0; i < vs.length; i++) await del('versions', vs[i].id);
+    await del('docs', id);
+    var m = await get('meta', 'currentDoc:' + project);
+    if (m && safeName(m.v) === safeName(name)) {
+      var docs = await listDocs(project);
+      if (docs.length) await setCurrentDoc(project, docs[0].name);
+    }
+  }
+
+  async function renameDoc(project, name, newName) {
+    var src = await getDoc(project, name);
+    if (!src) throw httpError(404, 'no graph named ' + JSON.stringify(name));
+    var nn = await uniqueDoc(project, newName);
+    var id = docId(project, nn);
+    await put('docs', Object.assign({}, src, { id: id, name: nn }));
+    var vs = await byIndex('versions', 'doc', src.id);
+    for (var i = 0; i < vs.length; i++) {
+      await put('versions', Object.assign({}, vs[i], { id: id + '@' + vs[i].vid, doc: id }));
+      await del('versions', vs[i].id);
+    }
+    await del('docs', src.id);
+    var m = await get('meta', 'currentDoc:' + project);
+    if (m && safeName(m.v) === src.name) await setCurrentDoc(project, nn);
+    return nn;
+  }
+
+  // ── versions ───────────────────────────────────────────────────────────────
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+  async function writeVersion(project, name, graph, label) {
+    var id = docId(project, name), now = new Date();
+    var stamp = '' + now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate())
+      + '-' + pad(now.getHours()) + pad(now.getMinutes()) + pad(now.getSeconds());
+    // two saves in one second must not overwrite each other; zero-padded so ids
+    // still sort chronologically as text ('-02' before '-10')
+    var vid = stamp, n = 2;
+    while (await get('versions', id + '@' + vid)) { vid = stamp + '-' + pad(n); n++; }
+    var rec = { id: id + '@' + vid, doc: id, vid: vid, saved: now.toISOString(), label: label, graph: graph };
+    await put('versions', rec);
+    var vs = (await byIndex('versions', 'doc', id)).sort(function (a, b) { return a.vid < b.vid ? -1 : 1; });
+    for (var i = 0; i < vs.length - MAX_VERSIONS; i++) await del('versions', vs[i].id);
+    requestPersist();
+    return { id: vid, saved: rec.saved, label: label };
+  }
+
+  async function listVersions(project, name) {
+    var vs = await byIndex('versions', 'doc', docId(project, name));
+    vs.sort(function (a, b) { return a.vid < b.vid ? 1 : -1; });
+    return vs.map(function (v) {
+      return { id: v.vid, saved: v.saved, label: v.label || '', nodes: ((v.graph && v.graph.nodes) || []).length };
+    });
+  }
+
+  async function loadVersion(project, name, vid) {
+    var v = await get('versions', docId(project, name) + '@' + vid);
+    if (!v) throw httpError(404, 'no such version');
+    return v.graph || {};
+  }
+
+  // Snapshot what is there first, so restoring is itself undoable.
+  async function restoreVersion(project, name, vid) {
+    var graph = await loadVersion(project, name, vid);
+    var cur = await getDoc(project, name);
+    if (cur && cur.graph) await writeVersion(project, name, cur.graph, 'before restore');
+    await saveDoc(project, name, graph, false);
+    return graph;
+  }
+
+  // Ask the browser not to evict this site's storage under disk pressure. Once,
+  // on the first explicit save, which is when someone has shown they mean to keep
+  // things. Chrome decides silently; Firefox may ask.
+  var persistAsked = false;
+  function requestPersist() {
+    if (persistAsked) return;
+    persistAsked = true;
+    try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {}); }
+    catch (e) {}
+  }
+
+  // ── image rename (mirrors projects.rename_image) ───────────────────────────
+  // The extension only changes between known image suffixes and the bytes are
+  // never re-encoded; a bare name keeps the original suffix.
+  async function renameImage(project, file, newName) {
+    var rec = await get('images', imgId(project, file));
+    if (!rec) throw httpError(404, 'no image named ' + JSON.stringify(file));
+    var raw = baseName(String(newName || '').trim());
+    var m = /\.[^.]*$/.exec(raw);
+    var ext = m && m.index > 0 ? m[0].toLowerCase() : '';
+    var stem = ext ? raw.slice(0, -ext.length) : raw;
+    stem = Array.from(stem).filter(function (c) { return /[\p{L}\p{N}]/u.test(c) || ' ._-'.indexOf(c) >= 0; }).join('').trim();
+    if (!stem) throw httpError(400, 'that name has no usable characters');
+    if (IMG_EXTS.indexOf(ext) < 0) ext = (/\.[^.]*$/.exec(rec.filename) || ['.png'])[0];
+    var dst = stem + ext;
+    if (dst === rec.filename) return entry(rec);
+    if (await get('images', imgId(project, dst))) throw httpError(400, dst + ' already exists');
+    var moved = Object.assign({}, rec, { id: imgId(project, dst), filename: dst, mtime: Date.now() });
+    await put('images', moved);
+    await del('images', rec.id);
+    var u = urls.get(rec.filename);
+    if (u) { urls.delete(rec.filename); urls.set(dst, u); }
+    return entry(moved);
+  }
+
+  // ── .forge.json bundles (same format as forge_server/bundle.py) ────────────
+  // Images ride along as data URLs, so a file exported here opens in the desktop
+  // app and the other way round.
   function blobToDataURL(blob) {
     return new Promise(function (res, rej) {
       var fr = new FileReader();
@@ -300,24 +448,184 @@
     });
   }
 
-  async function importGraph(payload, projectName) {
+  function referencedImages(graph) {
+    var out = new Set();
+    ((graph && graph.nodes) || []).forEach(function (n) {
+      var p = n.properties || {};
+      ['file', 'output'].forEach(function (k) {
+        if (typeof p[k] === 'string' && hasImageExt(p[k])) out.add(baseName(p[k]));
+      });
+    });
+    return out;
+  }
+
+  async function collectImages(project, only) {
+    var rows = await projectImages(project), out = [];
+    for (var i = 0; i < rows.length; i++) {
+      if (only && !only.has(rows[i].filename)) continue;
+      out.push({ filename: rows[i].filename, kind: rows[i].kind, data: await blobToDataURL(rows[i].blob) });
+    }
+    return out;
+  }
+
+  async function exportGraphBundle(project, name) {
+    name = name || await currentDoc(project);
+    var graph = await loadDoc(project, name);
+    return {
+      forge: 1, kind: 'graph', project: project, name: name, graph: graph,
+      images: await collectImages(project, referencedImages(graph)),
+    };
+  }
+
+  async function exportProjectBundle(project) {
+    var docs = await listDocs(project), graphs = {};
+    for (var i = 0; i < docs.length; i++) graphs[docs[i].name] = await loadDoc(project, docs[i].name);
+    var cur = await currentDoc(project);
+    return {
+      forge: 1, kind: 'project', project: project, current: cur, graphs: graphs,
+      graph: graphs[cur] || {},        // what an older web importer looks for
+      images: await collectImages(project),
+    };
+  }
+
+  // Always into a NEW project, so an import can never overwrite open work.
+  async function importBundle(payload, projectName) {
+    if (!payload || typeof payload !== 'object') throw httpError(400, 'not a Forge file');
+    var docs = payload.graphs && typeof payload.graphs === 'object' ? payload.graphs : null;
+    if (!docs || !Object.keys(docs).length) {
+      if (!payload.graph || typeof payload.graph !== 'object') throw httpError(400, 'not a Forge file — no graph inside');
+      docs = {};
+      docs[safeName(payload.name || DEFAULT_DOC)] = payload.graph;
+    }
+    var base = String(projectName || payload.project || 'Imported').trim() || 'Imported';
+    var project = base, n = 2;
+    while (await get('projects', project)) project = base + ' ' + n++;
+    await put('projects', { name: project, created: Date.now() });
+
+    var names = Object.keys(docs);
+    for (var i = 0; i < names.length; i++) {
+      if (docs[names[i]] && typeof docs[names[i]] === 'object') await saveDoc(project, names[i], docs[names[i]], false);
+    }
+    var current = payload.current && docs[payload.current] ? payload.current : names[0];
+    await setCurrentDoc(project, current);
+
+    var images = 0, list = payload.images || [];
+    for (var j = 0; j < list.length; j++) {
+      var im = list[j];
+      if (!im || typeof im.data !== 'string' || im.data.indexOf(',') < 0) continue;
+      try {
+        var blob = await (await fetch(im.data)).blob();
+        var filename = baseName(im.filename) || 'image.png';
+        await put('images', {
+          id: imgId(project, filename), project: project, filename: filename,
+          kind: im.kind || 'import', blob: blob, mtime: Date.now(), size: blob.size, meta: {},
+        });
+        images++;
+      } catch (e) { /* skip an unreadable image rather than fail the whole import */ }
+    }
+    return { ok: true, project: project, current: safeName(current), graphs: names.length, images: images };
+  }
+
+  // ── fetch router, used by static-shim.js ───────────────────────────────────
+  // Returns a Response for routes this store owns, or null to let the shim fall
+  // through to the baked /data/*.json (shaders, math nodes, workflow schemas).
+  async function handleFetch(url, init) {
     await ready;
-    if (!payload || !payload.graph) throw new Error('not a Forge graph file');
-    var name = projectName || payload.project || 'Imported';
-    var existing = await get('projects', name);
-    if (existing) name = name + ' ' + new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
-    await put('projects', { name: name, created: Date.now() });
-    await saveGraph(name, payload.graph);
-    for (var i = 0; i < (payload.images || []).length; i++) {
-      var im = payload.images[i];
-      var blob = await (await fetch(im.data)).blob();
-      await put('images', {
-        id: imgId(name, im.filename), project: name, filename: im.filename,
-        kind: im.kind || 'import', blob: blob, mtime: Date.now(), size: blob.size, meta: {},
+    var u = new URL(url, location.href);
+    var path = u.pathname;
+    var method = ((init && init.method) || 'GET').toUpperCase();
+    var q = function (k) { return u.searchParams.get(k); };
+    var json = function (o) {
+      return new Response(JSON.stringify(o), { headers: { 'Content-Type': 'application/json' } });
+    };
+    try {
+      var res = await route(path, method, q, init || {});
+      return res === null ? null : json(res);
+    } catch (e) {
+      return new Response(JSON.stringify({ detail: e.message || String(e) }), {
+        status: e.status || 500, headers: { 'Content-Type': 'application/json' },
       });
     }
-    await put('meta', { k: 'currentProject', v: name });
-    return name;
+  }
+
+  async function route(path, method, q, init) {
+    var p = method === 'GET' ? {} : body(init);
+    var project = (method === 'GET' ? q('project') : p.project) || await currentProject();
+    var name;
+
+    switch (path) {
+      // documents
+      case '/api/graph':
+        if (method === 'GET') return loadDoc(project, q('name'));
+        return saveDoc(project, p.name || await currentDoc(project), p.graph, !!p.snapshot, p.label);
+      case '/api/graphs':
+        return { graphs: await listDocs(project), current: await currentDoc(project) };
+      case '/api/graphs/select':
+        await setCurrentDoc(project, p.name);
+        return { ok: true, name: await currentDoc(project), graph: await loadDoc(project, p.name) };
+      case '/api/graphs/saveas':
+        name = await uniqueDoc(project, p.name);
+        await saveDoc(project, name, p.graph, true, 'saved as');
+        await setCurrentDoc(project, name);
+        return { ok: true, name: name };
+      case '/api/graphs/delete':
+        if ((await listDocs(project)).length <= 1) throw httpError(400, 'a project needs at least one graph');
+        await deleteDoc(project, p.name);
+        return { ok: true, current: await currentDoc(project) };
+      case '/api/graphs/rename':
+        return { ok: true, name: await renameDoc(project, p.name, p.new_name) };
+
+      // versions
+      case '/api/graph/versions':
+        name = q('name') || await currentDoc(project);
+        return { name: name, versions: await listVersions(project, name) };
+      case '/api/graph/version':
+        return loadVersion(project, q('name') || await currentDoc(project), q('id'));
+      case '/api/graph/version/restore':
+        return { ok: true, graph: await restoreVersion(project, p.name || await currentDoc(project), p.id) };
+
+      // bundles
+      case '/api/export/graph': return exportGraphBundle(project, q('name'));
+      case '/api/export/project': return exportProjectBundle(project);
+      case '/api/import/bundle': return importBundle(p.payload, p.project);
+
+      // gallery
+      case '/api/image/rename': return renameImage(project, p.file, p.new_name);
+      case '/api/image/delete': return api.deleteImage(project, p.file);
+
+      // projects + settings
+      case '/api/projects': return api.listProjects();
+      case '/api/project': return api.getProject();
+      case '/api/settings': return api.getSettings();
+      case '/api/gallery': return api.gallery(project);
+      case '/api/comfy/status': return api.comfyStatus();
+      case '/api/projects/select':
+      case '/api/projects/create':
+        try { return await (path.endsWith('create') ? api.createProject : api.selectProject)(p.name); }
+        catch (e) { throw httpError(400, e.message); }
+    }
+    return null;
+  }
+
+  // ── compatibility helpers for callers that predate documents ───────────────
+  // Each acts on a project's current document.
+  async function loadGraph(project) {
+    await ready;
+    project = project || await currentProject();
+    return loadDoc(project);
+  }
+  async function saveGraph(project, graph) {
+    await ready;
+    project = project || await currentProject();
+    return saveDoc(project, await currentDoc(project), graph, false);
+  }
+  async function exportGraph(project) {
+    await ready;
+    return exportGraphBundle(project || await currentProject());
+  }
+  async function importGraph(payload, projectName) {
+    await ready;
+    return (await importBundle(payload, projectName)).project;
   }
 
   window.ForgeStore = {
