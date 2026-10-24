@@ -33,6 +33,8 @@ uniform float uLifetime;
 uniform float uLifetimeVariation;
 uniform float uDrag;
 uniform float uForceStrength;
+uniform float uImmortal;
+uniform float uSpringStiffness;
 
 const float PI = 3.14159265359;
 
@@ -131,7 +133,9 @@ void main()
         return;
     }
 
-    age += uDeltaTime;
+    bool immortal = uImmortal > 0.5;
+
+    if (!immortal) age += uDeltaTime;
 
     bool outside =
     position.x < -0.05 ||
@@ -139,7 +143,7 @@ void main()
     position.y < -0.05 ||
     position.y > 1.05;
 
-    if (age >= lifetime || outside)
+    if (!immortal && (age >= lifetime || outside))
     {
         spawnParticle(id, uSeed + 23.0, false);
         return;
@@ -148,6 +152,10 @@ void main()
     vec2 field = texture(uForce, clamp(position, 0.0, 1.0)).rg * 2.0 - 1.0;
     if (length(field) < 0.01) field = vec2(0.0);
     velocity += field * uForceStrength * uDeltaTime;
+
+    vec2 home = spawn.xy;
+    velocity += (home - position) * uSpringStiffness * uDeltaTime;
+
     velocity *= exp(-max(0.0, uDrag) * uDeltaTime);
     position += velocity * uDeltaTime;
 

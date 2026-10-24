@@ -53,5 +53,8 @@ export default {
         { uniform: "uAlphaEnd", label: "Alpha · End", type: "range", min: 0, max: 1, step: 0.01, value: 0 },
 
         { uniform: "uAdditive", label: "Additive", type: "bool", value: true },
+
+        { uniform: "uImmortal",     label: "Live Forever",  type: "bool",  value: false },
+        { uniform: "uSpringStiffness", label: "Spring · Stiffness", type: "range", min: 0, max: 50, step: 0.1, value: 0 },
     ],
 };
