@@ -15,6 +15,7 @@ import { buildEndUserUI } from './endui.js';
 import { decodeGraph, readHash } from './share.js';
 import { toast } from './ui.js';
 import { cloud, openCloudDialog, onCloudChange, mountCloudIndicator } from './cloudai.js';
+import { startLoop } from './loop.js';
 
 const LG = window.LiteGraph;
 const $ = (id) => document.getElementById(id);
@@ -113,7 +114,6 @@ function aiButton() {
     if (!RT.capturing) evalOnce();
     drawPreviews();
     RT.runHooks();       // the fullscreen viewer draws from here
-    requestAnimationFrame(frame);
   }
-  requestAnimationFrame(frame);
+  startLoop(frame);      // keeps going behind a fullscreen Viewer Window (loop.js)
 })();

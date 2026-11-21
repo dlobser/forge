@@ -36,8 +36,19 @@ const DEFAULTS = {
   mode: 'still', drawOn: 'whole line', timing: 'as drawn',
   length: 4, speed: 1, segment: 0.15, loop: true, background: 'black',
   color: '#ffffff', width: 12, softness: 0.3, opacity: 1,
+  // brush character — captured onto each stroke as it's drawn, like colour and width
+  brush: 'line', scatter: 1.5, dotSize: 0.35, density: 2,
+  hueJit: 0, satJit: 0, valJit: 0,
+  speedWidth: 'off', speedAmt: 0.6,
 };
 const BACKGROUNDS = { black: [0, 0, 0, 1], transparent: [0, 0, 0, 0], white: [1, 1, 1, 1] };
+const SPEED_MODES = ['off', 'fast = thin', 'fast = thick'];
+// node widget label for each property that isn't simply its own name
+const LABELS = {
+  drawOn: 'draw on', length: 'length (s)', dotSize: 'dot size', hueJit: 'hue jitter',
+  satJit: 'sat jitter', valJit: 'val jitter', speedWidth: 'speed → width', speedAmt: 'speed amount',
+};
+const label = (k) => LABELS[k] || k;
 // Brush width is in pixels of a 1024px frame, so a drawing keeps its look when the
 // render size changes.
 const REF = 1024;
@@ -49,35 +60,82 @@ const hexRgb = (h) => {
   return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
 };
 const round4 = (v) => Math.round(v * 10000) / 10000;
+const round3 = (v) => Math.round(v * 1000) / 1000;
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+// ── brush character: scatter, colour jitter, speed → width ──────────────────────
+// Everything random is a hash of (stroke seed, index), not Math.random(), so a
+// stroke's dots and colours are identical every frame and on every reload.
+function rnd(seed, i, k) {
+  let h = (seed * 374761393 + i * 668265263 + k * 1274126177) | 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177);
+  h ^= h >>> 16;
+  h = Math.imul(h, 2246822507); h ^= h >>> 13;
+  return (h >>> 0) / 4294967296;
+}
+function rgb2hsv([r, g, b]) {
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn;
+  let h = 0;
+  if (d > 1e-6) {
+    if (mx === r) h = ((g - b) / d) % 6; else if (mx === g) h = (b - r) / d + 2; else h = (r - g) / d + 4;
+    h /= 6; if (h < 0) h += 1;
+  }
+  return [h, mx > 1e-6 ? d / mx : 0, mx];
+}
+function hsv2rgb(h, s, v) {
+  const f = (n) => { const k = (n + h * 6) % 6; return v - v * s * Math.max(0, Math.min(k, 4 - k, 1)); };
+  return [f(5), f(3), f(1)];
+}
+// j = [hue, sat, val] jitter amounts, 0..1 each. Hue swings up to half a turn.
+function jitter(rgb, j, seed, i) {
+  if (!j || !(j[0] || j[1] || j[2])) return rgb;
+  const [h, s, v] = rgb2hsv(rgb);
+  return hsv2rgb(
+    ((h + (rnd(seed, i, 11) - 0.5) * j[0]) % 1 + 1) % 1,
+    clamp01(s + (rnd(seed, i, 12) - 0.5) * 2 * j[1]),
+    clamp01(v + (rnd(seed, i, 13) - 0.5) * 2 * j[2]));
+}
+// Width multiplier at point i from the pen speed recorded there (frame heights per
+// second). st.sm > 0: faster is thinner, like ink; st.sm < 0: faster is thicker.
+function speedFactor(st, i) {
+  const a = +st.sm || 0;
+  if (!a || !st.v || !st.v.length) return 1;
+  const v = +st.v[Math.min(i, st.v.length - 1)] || 0, n = v / (v + 1.2);
+  return a > 0 ? Math.max(0.06, 1 - a * n * 1.1) : 1 - a * n * 2.2;
+}
 
 // ── GPU stroke renderer ────────────────────────────────────────────────────────
+// One instance per capsule: endpoints, colour + alpha, radius. A dot is a capsule
+// whose ends coincide, so scatter strokes go through the same pipe.
 const SEG_VERT = `#version 300 es
 precision highp float;
 layout(location = 0) in vec4 aSeg;        // p0.xy, p1.xy in target pixels
-uniform vec2 uRes; uniform float uRadius;
-out vec2 vP; flat out vec4 vSeg;
+layout(location = 1) in vec4 aCol;        // rgb + alpha
+layout(location = 2) in float aRad;       // radius in pixels
+uniform vec2 uRes;
+out vec2 vP; flat out vec4 vSeg; flat out vec4 vCol; flat out float vRad;
 void main(){
   vec2 C[6] = vec2[6](vec2(0,0), vec2(1,0), vec2(0,1), vec2(0,1), vec2(1,0), vec2(1,1));
   vec2 c = C[gl_VertexID];
   vec2 a = aSeg.xy, b = aSeg.zw, d = b - a;
   float L = length(d);
   vec2 t = L > 1e-5 ? d / L : vec2(1.0, 0.0), n = vec2(-t.y, t.x);
-  float R = uRadius + 1.5;                 // +AA fringe
+  float R = aRad + 1.5;                    // +AA fringe
   vec2 p = mix(a - t * R, b + t * R, c.x) + n * mix(-R, R, c.y);
-  vP = p; vSeg = aSeg;
+  vP = p; vSeg = aSeg; vCol = aCol; vRad = aRad;
   gl_Position = vec4(p / uRes * 2.0 - 1.0, 0.0, 1.0);
 }`;
 const SEG_FRAG = `#version 300 es
 precision highp float;
-in vec2 vP; flat in vec4 vSeg; out vec4 o;
-uniform vec3 uCol; uniform float uAlpha, uRadius, uSoft;
+in vec2 vP; flat in vec4 vSeg; flat in vec4 vCol; flat in float vRad; out vec4 o;
+uniform float uSoft;
 void main(){
   vec2 pa = vP - vSeg.xy, ba = vSeg.zw - vSeg.xy;
   float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
   float d = length(pa - ba * h);
-  float inner = min(uRadius * (1.0 - uSoft), uRadius - 1.0);
-  float a = (1.0 - smoothstep(inner, uRadius + 0.5, d)) * uAlpha;
-  o = vec4(uCol * a, a);                   // premultiplied
+  float inner = min(vRad * (1.0 - uSoft), vRad - 1.0);
+  float a = (1.0 - smoothstep(inner, vRad + 0.5, d)) * vCol.a;
+  o = vec4(vCol.rgb * a, a);               // premultiplied
 }`;
 const FS_VERT = `#version 300 es
 precision highp float; out vec2 vUv;
@@ -86,6 +144,8 @@ const FS_FRAG = `#version 300 es
 precision highp float; in vec2 vUv; out vec4 o; uniform sampler2D uColor;
 void main(){ o = texture(uColor, vUv); }`;
 
+const STRIDE = 9;   // floats per instance: x0 y0 x1 y1 r g b a radius
+
 let G = null;   // per-page GL objects, built on first render
 function gpu() {
   const engine = RT.engine, gl = engine.gl;
@@ -93,27 +153,30 @@ function gpu() {
   const vao = gl.createVertexArray(), buf = gl.createBuffer();
   gl.bindVertexArray(vao);
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribDivisor(0, 1);
+  for (let a = 0; a < 3; a++) { gl.enableVertexAttribArray(a); gl.vertexAttribDivisor(a, 1); }
   gl.bindVertexArray(null);
   G = { gl, vao, buf, cap: 0, fbo: gl.createFramebuffer() };
   return G;
 }
 
-// strokes: [{ rgb, alpha, radius, soft, segs: Float32Array (x0,y0,x1,y1 …) }]
+// strokes: [{ soft, over, data: Float32Array (STRIDE floats per capsule) }]
+//   over = false  a line: rasterised alone with MAX blending (one even opacity
+//                 however its capsules overlap), then composited over the result
+//   over = true   scatter dots: each dot is laid straight over what's there, so
+//                 overlapping dots build up and keep their own colours
 function renderStrokes(outTex, tmpTex, w, h, bg, strokes) {
   const engine = RT.engine, gl = engine.gl, g = gpu();
-  const segProg = engine.ensureProgram('__drawSeg', SEG_VERT, SEG_FRAG);
+  const segProg = engine.ensureProgram('__drawSeg2', SEG_VERT, SEG_FRAG);
   const cpProg = engine.ensureProgram('__drawCopy', FS_VERT, FS_FRAG);
   const loc = (info, n) => engine._loc(info, n);
 
   // one upload for the whole frame; each stroke is drawn from its own offset
   let total = 0;
-  for (const s of strokes) total += s.segs.length;
-  const data = new Float32Array(Math.max(4, total));
+  for (const s of strokes) total += s.data.length;
+  const data = new Float32Array(Math.max(STRIDE, total));
   const offs = [];
   let o = 0;
-  for (const s of strokes) { offs.push(o); data.set(s.segs, o); o += s.segs.length; }
+  for (const s of strokes) { offs.push(o); data.set(s.data, o); o += s.data.length; }
   gl.bindBuffer(gl.ARRAY_BUFFER, g.buf);
   if (data.byteLength > g.cap) { g.cap = data.byteLength * 2; gl.bufferData(gl.ARRAY_BUFFER, g.cap, gl.DYNAMIC_DRAW); }
   gl.bufferSubData(gl.ARRAY_BUFFER, 0, data);
@@ -125,24 +188,34 @@ function renderStrokes(outTex, tmpTex, w, h, bg, strokes) {
   gl.clearColor(bg[0] * bg[3], bg[1] * bg[3], bg[2] * bg[3], bg[3]);
   gl.clear(gl.COLOR_BUFFER_BIT);
 
+  const drawSegs = (i, n) => {
+    gl.useProgram(segProg.prog);
+    gl.bindVertexArray(g.vao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, g.buf);
+    const base = offs[i] * 4, bytes = STRIDE * 4;
+    gl.vertexAttribPointer(0, 4, gl.FLOAT, false, bytes, base);
+    gl.vertexAttribPointer(1, 4, gl.FLOAT, false, bytes, base + 16);
+    gl.vertexAttribPointer(2, 1, gl.FLOAT, false, bytes, base + 32);
+    gl.uniform2f(loc(segProg, 'uRes'), w, h);
+    gl.uniform1f(loc(segProg, 'uSoft'), strokes[i].soft);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
+  };
+
   gl.enable(gl.BLEND);
   strokes.forEach((s, i) => {
-    const n = s.segs.length / 4;
+    const n = s.data.length / STRIDE;
     if (!n) return;
+    if (s.over) {
+      target(outTex);
+      gl.blendEquation(gl.FUNC_ADD); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      drawSegs(i, n);
+      return;
+    }
     // 1. the stroke alone, MAX-blended so it has one uniform opacity
     target(tmpTex);
     gl.clearColor(0, 0, 0, 0); gl.clear(gl.COLOR_BUFFER_BIT);
     gl.blendEquation(gl.MAX); gl.blendFunc(gl.ONE, gl.ONE);
-    gl.useProgram(segProg.prog);
-    gl.bindVertexArray(g.vao);
-    gl.bindBuffer(gl.ARRAY_BUFFER, g.buf);
-    gl.vertexAttribPointer(0, 4, gl.FLOAT, false, 16, offs[i] * 4);
-    gl.uniform2f(loc(segProg, 'uRes'), w, h);
-    gl.uniform1f(loc(segProg, 'uRadius'), s.radius);
-    gl.uniform1f(loc(segProg, 'uSoft'), s.soft);
-    gl.uniform1f(loc(segProg, 'uAlpha'), s.alpha);
-    gl.uniform3f(loc(segProg, 'uCol'), s.rgb[0], s.rgb[1], s.rgb[2]);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
+    drawSegs(i, n);
     // 2. composite it over everything so far (premultiplied "over")
     target(outTex);
     gl.blendEquation(gl.FUNC_ADD); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -177,13 +250,14 @@ function arcKeys(st) {
   return c;
 }
 
-// Visible geometry for one stroke, in target pixels.
+// Visible geometry for one stroke, in target pixels: x0 y0 x1 y1 i per segment,
+// where i is the index of the segment's first point.
 function strokeSegs(st, keyOf, lo, hi, w, h) {
   const p = st.p, n = p.length / 3, out = [];
   const X = (i) => p[i * 3] * w, Y = (i) => (1 - p[i * 3 + 1]) * h;   // stored y-down, GL is y-up
   if (n === 1) {
     const k = keyOf(0);
-    if (k >= lo && k <= hi) out.push(X(0), Y(0), X(0), Y(0));
+    if (k >= lo && k <= hi) out.push(X(0), Y(0), X(0), Y(0), 0);
     return out;
   }
   for (let i = 0; i < n - 1; i++) {
@@ -197,9 +271,90 @@ function strokeSegs(st, keyOf, lo, hi, w, h) {
       if (f1 <= f0) continue;
     }
     const x0 = X(i), y0 = Y(i), x1 = X(i + 1), y1 = Y(i + 1);
-    out.push(x0 + (x1 - x0) * f0, y0 + (y1 - y0) * f0, x0 + (x1 - x0) * f1, y0 + (y1 - y0) * f1);
+    out.push(x0 + (x1 - x0) * f0, y0 + (y1 - y0) * f0, x0 + (x1 - x0) * f1, y0 + (y1 - y0) * f1, i);
   }
   return out;
+}
+
+// Scatter: dots strewn along the stroke. Where they fall, how big and what colour
+// depend only on the stroke and the render size, so they're cached; animation then
+// just decides which are visible. Each dot: segment i, fraction f along it, offset
+// (ox, oy) inside the unit disc, size factor, rgb.
+const DOT = 8, MAX_DOTS = 40000;
+const dotCache = new WeakMap();
+function scatterDots(st, w, h, R) {
+  const p = st.p, n = p.length / 3;
+  const seed = st.r | 0, dn = Math.max(0.05, +st.dn || 2), rgb = hexRgb(st.c);
+  const key = [n, w, h, R, dn, st.c, (st.j || []).join(',')].join('|');
+  const hit = dotCache.get(st);
+  if (hit && hit.key === key) return hit.dots;
+  const out = [];
+  const emit = (i, f, k) => {
+    const a = rnd(seed, k, 3) * Math.PI * 2, r = Math.sqrt(rnd(seed, k, 4));
+    const c = jitter(rgb, st.j, seed, k);
+    out.push(i, f, Math.cos(a) * r, Math.sin(a) * r, 0.5 + rnd(seed, k, 5), c[0], c[1], c[2]);
+  };
+  if (n === 1) {
+    for (let k = 0; k < Math.max(3, Math.ceil(dn * 4)); k++) emit(0, 0, k);
+  } else {
+    const sp = Math.max(0.75, 2 * R / dn);        // average spacing along the stroke, px
+    let acc = 0, next = sp * rnd(seed, 0, 1), k = 0;
+    for (let i = 0; i < n - 1 && k < MAX_DOTS; i++) {
+      const L = Math.hypot((p[i * 3 + 3] - p[i * 3]) * w, (p[i * 3 + 4] - p[i * 3 + 1]) * h);
+      while (L > 0 && next <= acc + L && k < MAX_DOTS) {
+        emit(i, (next - acc) / L, k); k++;
+        next += sp * (0.5 + rnd(seed, k, 2));
+      }
+      acc += L;
+    }
+  }
+  const dots = new Float32Array(out);
+  dotCache.set(st, { key, dots });
+  return dots;
+}
+
+// One stroke → GPU instances, given which part of it is visible.
+//   keyOf(i)  the point's position on the clip axis; lo..hi the visible window
+function strokeInstances(st, keyOf, lo, hi, w, h, scale) {
+  const seed = st.r | 0;
+  const R = Math.max(0.5, (st.w || 1) * 0.5 * scale);
+  const alpha = clamp01(st.o ?? 1), soft = clamp01(st.s ?? 0);
+  if (!st.b) {
+    // a line; colour jitter, if any, tints the whole stroke once
+    const rgb = jitter(hexRgb(st.c), st.j, seed, 0);
+    const segs = strokeSegs(st, keyOf, lo, hi, w, h), out = new Float32Array(segs.length / 5 * STRIDE);
+    for (let s = 0, o = 0; s < segs.length; s += 5, o += STRIDE) {
+      const i = segs[s + 4];
+      const k = (speedFactor(st, i) + speedFactor(st, i + 1)) * 0.5;
+      out[o] = segs[s]; out[o + 1] = segs[s + 1]; out[o + 2] = segs[s + 2]; out[o + 3] = segs[s + 3];
+      out[o + 4] = rgb[0]; out[o + 5] = rgb[1]; out[o + 6] = rgb[2]; out[o + 7] = alpha;
+      out[o + 8] = Math.max(0.5, R * k);
+    }
+    return { soft, over: false, data: out };
+  }
+  // scatter
+  const p = st.p, n = p.length / 3;
+  const dots = scatterDots(st, w, h, R);
+  const spread = Math.max(0, +st.sc || 0), size = Math.max(0.02, +st.ds || 0.35);
+  const X = (i) => p[i * 3] * w, Y = (i) => (1 - p[i * 3 + 1]) * h;
+  const out = new Float32Array(dots.length / DOT * STRIDE);
+  let o = 0;
+  for (let d = 0; d < dots.length; d += DOT) {
+    const i = dots[d], f = dots[d + 1], j = Math.min(i + 1, n - 1);
+    const k0 = keyOf(i), k1 = keyOf(j);
+    if (k1 < k0) continue;
+    const key = k0 + (k1 - k0) * f;
+    if (key < lo || key > hi) continue;
+    const sf = speedFactor(st, i) * (1 - f) + speedFactor(st, j) * f;
+    const Re = R * sf;
+    const x = X(i) + (X(j) - X(i)) * f + dots[d + 2] * Re * spread;
+    const y = Y(i) + (Y(j) - Y(i)) * f + dots[d + 3] * Re * spread;
+    out[o] = x; out[o + 1] = y; out[o + 2] = x; out[o + 3] = y;
+    out[o + 4] = dots[d + 5]; out[o + 5] = dots[d + 6]; out[o + 6] = dots[d + 7]; out[o + 7] = alpha;
+    out[o + 8] = Math.max(0.35, Re * size * dots[d + 4]);
+    o += STRIDE;
+  }
+  return { soft, over: true, data: out.subarray(0, o) };
 }
 
 // ── the node ───────────────────────────────────────────────────────────────────
@@ -231,6 +386,17 @@ export function registerDrawingNode(H) {
     this.addWidget('slider', 'width', DEFAULTS.width, set('width', false), { min: 1, max: 200, step: 0.5 });
     this.addWidget('slider', 'softness', DEFAULTS.softness, set('softness', false), { min: 0, max: 1, step: 0.01 });
     this.addWidget('slider', 'opacity', DEFAULTS.opacity, set('opacity', false), { min: 0.01, max: 1, step: 0.01 });
+    // brush character (applies to strokes drawn from now on — or use right-click ▸
+    // Apply brush to all strokes)
+    this.addWidget('combo', 'brush', DEFAULTS.brush, set('brush', false), { values: ['line', 'scatter'] });
+    this.addWidget('slider', 'scatter', DEFAULTS.scatter, set('scatter', false), { min: 0, max: 6, step: 0.05 });
+    this.addWidget('slider', label('dotSize'), DEFAULTS.dotSize, set('dotSize', false), { min: 0.05, max: 1.5, step: 0.01 });
+    this.addWidget('slider', 'density', DEFAULTS.density, set('density', false), { min: 0.2, max: 10, step: 0.1 });
+    this.addWidget('slider', label('hueJit'), DEFAULTS.hueJit, set('hueJit', false), { min: 0, max: 1, step: 0.01 });
+    this.addWidget('slider', label('satJit'), DEFAULTS.satJit, set('satJit', false), { min: 0, max: 1, step: 0.01 });
+    this.addWidget('slider', label('valJit'), DEFAULTS.valJit, set('valJit', false), { min: 0, max: 1, step: 0.01 });
+    this.addWidget('combo', label('speedWidth'), DEFAULTS.speedWidth, set('speedWidth', false), { values: SPEED_MODES });
+    this.addWidget('slider', label('speedAmt'), DEFAULTS.speedAmt, set('speedAmt', false), { min: 0, max: 1, step: 0.01 });
     this.addWidget('button', '↶ undo stroke', null, () => this.undo());
     this.addWidget('button', '✕ clear all strokes', null, () => this.clearStrokes());
     this._size = { width: RT.RENDER_SIZE, height: RT.RENDER_SIZE };
@@ -283,9 +449,8 @@ export function registerDrawingNode(H) {
     const p = this.properties;
     for (const k in DEFAULTS) if (p[k] === undefined) p[k] = DEFAULTS[k];
     if (!Array.isArray(p.strokes)) p.strokes = [];
-    const names = { drawOn: 'draw on', length: 'length (s)' };
     for (const w of this.widgets || []) {
-      const key = Object.keys(DEFAULTS).find((k) => (names[k] || k) === w.name);
+      const key = Object.keys(DEFAULTS).find((k) => label(k) === w.name);
       if (key) w.value = p[key];
     }
     const modes = p.pinModes = p.pinModes || {};
@@ -299,6 +464,9 @@ export function registerDrawingNode(H) {
     }
     this._size = H.nodeRenderSize(this);
     this._ver++; this._dirty = true;
+    // drawings saved before the brush widgets existed are too short for them
+    const min = this.computeSize()[1] + H.THUMB_H;
+    if (this.size[1] < min) this.size[1] = min;
   };
 
   P.onRemoved = function () {
@@ -331,34 +499,70 @@ export function registerDrawingNode(H) {
     const speed = Math.max(0, +this._pinned('speed') || 0);
     return this._head + (performance.now() - this._penT0) / 1000 * speed / this.clipLength();
   };
-  P.beginStroke = function (x, y) {
+  // The node's current brush character, as the fields a stroke stores. Only what
+  // differs from a plain line is written, so ordinary strokes stay small in a link.
+  P._brushFields = function () {
+    const p = this.properties, f = {};
+    if (p.brush === 'scatter') { f.b = 1; f.sc = round3(+p.scatter || 0); f.ds = round3(+p.dotSize || 0.35); f.dn = round3(+p.density || 2); }
+    const j = [+p.hueJit || 0, +p.satJit || 0, +p.valJit || 0];
+    if (j[0] || j[1] || j[2]) f.j = j.map(round3);
+    const amt = +p.speedAmt || 0;
+    if (p.speedWidth === 'fast = thin' && amt) f.sm = round3(amt);
+    else if (p.speedWidth === 'fast = thick' && amt) f.sm = -round3(amt);
+    return f;
+  };
+  // tMs is the pointer event's timestamp — it's what pen speed is measured against
+  P.beginStroke = function (x, y, tMs) {
     const p = this.properties;
     this._penT0 = performance.now();
-    const st = { c: p.color, w: +p.width, s: +p.softness, o: +p.opacity, p: [round4(x), round4(y), round4(this._head)] };
+    this._penLast = tMs || performance.now(); this._penV = 0;
+    const st = Object.assign({ c: p.color, w: +p.width, s: +p.softness, o: +p.opacity,
+      r: Math.floor(Math.random() * 1e6), p: [round4(x), round4(y), round4(this._head)], v: [0] }, this._brushFields());
     p.strokes.push(st);
     this._pen = st; this._ver++; this._dirty = true;
     return st;
   };
-  P.extendStroke = function (x, y) {
+  P.extendStroke = function (x, y, tMs) {
     const st = this._pen; if (!st) return;
     const n = st.p.length;
     const dx = (x - st.p[n - 3]) * this._size.width, dy = (y - st.p[n - 2]) * this._size.height;
     if (dx * dx + dy * dy < 0.5) return;           // under half a pixel: noise
     st.p.push(round4(x), round4(y), round4(this._stamp()));
+    // Pen speed in frame heights per second, smoothed so one jittery event doesn't
+    // pinch the line. Recorded on every stroke, so speed → width can be applied later.
+    const now = tMs || performance.now();
+    const dt = Math.max(1, now - (this._penLast || now)) / 1000;
+    const inst = Math.hypot(dx, dy) / Math.max(1, Math.min(this._size.width, this._size.height)) / dt;
+    this._penV = this._penV ? this._penV * 0.65 + inst * 0.35 : inst;
+    this._penLast = now;
+    if (!Array.isArray(st.v)) st.v = [];
+    while (st.v.length < n / 3) st.v.push(0);
+    st.v.push(Math.round(this._penV * 100) / 100);
     this._ver++; this._dirty = true;
+  };
+  // Re-brush everything already drawn with the current settings — all but colour,
+  // so a many-coloured drawing keeps its colours.
+  P.applyBrushToAll = function () {
+    const p = this.properties, f = this._brushFields();
+    for (const st of p.strokes) {
+      for (const k of ['b', 'sc', 'ds', 'dn', 'j', 'sm']) delete st[k];
+      Object.assign(st, { w: +p.width, s: +p.softness, o: +p.opacity }, f);
+      if (st.r === undefined) st.r = Math.floor(Math.random() * 1e6);
+    }
+    this._ver++; this._dirty = true; RT.requestSave(); RT.redraw();
   };
   P.endStroke = function () { if (!this._pen) return; this._pen = null; this._penT0 = 0; RT.requestSave(); RT.redraw(); };
 
   P._visibleStrokes = function (w, h) {
     const p = this.properties, strokes = p.strokes;
     const scale = Math.min(w, h) / REF;
-    const brush = (st) => ({
-      rgb: hexRgb(st.c), alpha: Math.max(0, Math.min(1, st.o ?? 1)),
-      radius: Math.max(0.5, (st.w || 1) * 0.5 * scale), soft: Math.max(0, Math.min(1, st.s ?? 0)),
-    });
     const out = [];
+    const add = (st, keyOf, lo, hi) => {
+      const s = strokeInstances(st, keyOf, lo, hi, w, h, scale);
+      if (s.data.length) out.push(s);
+    };
     if (p.mode !== 'animate') {
-      for (const st of strokes) out.push(Object.assign(brush(st), { segs: new Float32Array(strokeSegs(st, () => 0, -1, 1, w, h)) }));
+      for (const st of strokes) add(st, () => 0, -1, 1);
       return out;
     }
     const seg = Math.max(0.001, +this._pinned('segment') || 0);
@@ -379,8 +583,7 @@ export function registerDrawingNode(H) {
         if (p.timing === 'together') keyOf = a.len > 0 ? (i) => a.cum[i] / a.len : () => 0;
         else { const b = before; keyOf = total > 0 ? (i) => (b + a.cum[i]) / total : () => 0; before += a.len; }
       }
-      const segs = strokeSegs(st, keyOf, lo, hi, w, h);
-      if (segs.length) out.push(Object.assign(brush(st), { segs: new Float32Array(segs) }));
+      add(st, keyOf, lo, hi);
     }
     return out;
   };
@@ -451,6 +654,8 @@ export function registerDrawingNode(H) {
       },
     }, {
       content: '↺ Restart clip', callback: () => { node.resetClip(); RT.redraw(); },
+    }, {
+      content: '✱ Apply brush to all strokes (keeps colours)', callback: () => node.applyBrushToAll(),
     }];
   };
 
@@ -498,25 +703,49 @@ const pane = {
     ghost.append(ghostBox, 'Ghost'); ghost.title = 'In animate mode, show every stroke faintly so you can see what you drew';
     const undo = mkBtn('↶', 'Undo stroke (Ctrl+Z)'), clear = mkBtn('Clear', 'Clear all strokes'), close = mkBtn('✕', 'Close');
     bar.append(title, color, width.l, soft.l, opac.l, ghost, undo, clear, close);
+    // second row: brush character — scatter dots, colour jitter, speed → width
+    const row2 = document.createElement('div');
+    row2.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 8px;border-bottom:1px solid #262b33;'
+      + 'user-select:none;flex-wrap:wrap;';
+    const mkSelect = (opts, tip) => {
+      const el = document.createElement('select'); el.title = tip;
+      el.style.cssText = 'background:#1c2028;color:#e6e8ea;border:1px solid #262b33;border-radius:5px;padding:2px 4px;font-size:11px;';
+      for (const o of opts) { const op = document.createElement('option'); op.value = op.textContent = o; el.appendChild(op); }
+      return el;
+    };
+    const brushSel = mkSelect(['line', 'scatter'], 'Brush: a solid line, or a scatter of little dots');
+    const spread = mkRange('Spread', 0, 6, 0.05), dot = mkRange('Dot', 0.05, 1.5, 0.01), dens = mkRange('Dens', 0.2, 10, 0.1);
+    const jh = mkRange('H±', 0, 1, 0.01), js = mkRange('S±', 0, 1, 0.01), jv = mkRange('V±', 0, 1, 0.01);
+    for (const r of [spread, dot, dens, jh, js, jv]) r.r.style.width = '50px';
+    jh.l.title = 'Random hue shift (per dot when scattering, per stroke for a line)';
+    js.l.title = 'Random saturation shift'; jv.l.title = 'Random brightness shift';
+    const speedSel = mkSelect(SPEED_MODES, 'Pen speed → line width');
+    const speedAmt = mkRange('Amt', 0, 1, 0.01); speedAmt.r.style.width = '50px';
+    row2.append(brushSel, spread.l, dot.l, dens.l, jh.l, js.l, jv.l, speedSel, speedAmt.l);
     const area = document.createElement('div');
     area.style.cssText = 'flex:1;position:relative;background:#0a0c0f;min-height:0;';
     const canvas = document.createElement('canvas');
     canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;cursor:none;touch-action:none;';
     canvas.tabIndex = 0;
     area.append(canvas);
-    root.append(bar, area);
+    root.append(bar, row2, area);
     document.body.appendChild(root);
-    this.ui = { root, bar, title, color, width: width.r, soft: soft.r, opac: opac.r, ghost: ghostBox, canvas, ctx: canvas.getContext('2d') };
+    this.ui = { root, bar, title, color, width: width.r, soft: soft.r, opac: opac.r, ghost: ghostBox, canvas, ctx: canvas.getContext('2d'),
+      brush: brushSel, scatter: spread.r, dotSize: dot.r, density: dens.r, hueJit: jh.r, satJit: js.r, valJit: jv.r,
+      speedWidth: speedSel, speedAmt: speedAmt.r, scatterBits: [spread.l, dot.l, dens.l] };
 
     // brush controls write straight through to the node (and its widgets)
     const brush = (k, el, conv) => el.addEventListener('input', () => {
       const n = this.node; if (!n) return;
       n.properties[k] = conv(el.value);
-      const w = (n.widgets || []).find((x) => x.name === k); if (w) w.value = n.properties[k];
+      const w = (n.widgets || []).find((x) => x.name === label(k)); if (w) w.value = n.properties[k];
+      if (k === 'brush') this.sync();
       RT.requestSave(); RT.redraw();
     });
     brush('color', color, (v) => v);
     brush('width', width.r, Number); brush('softness', soft.r, Number); brush('opacity', opac.r, Number);
+    brush('brush', brushSel, (v) => v); brush('speedWidth', speedSel, (v) => v);
+    for (const k of ['scatter', 'dotSize', 'density', 'hueJit', 'satJit', 'valJit', 'speedAmt']) brush(k, this.ui[k], Number);
     undo.onclick = () => this.node && this.node.undo();
     clear.onclick = () => this.node && this.node.clearStrokes();
     close.onclick = () => this.close();
@@ -545,14 +774,14 @@ const pane = {
       if (!this.node || e.button !== 0) return;
       const pt = toImage(e); if (!pt) return;
       canvas.setPointerCapture(e.pointerId); canvas.focus();
-      this.node.beginStroke(pt[0], pt[1]);
+      this.node.beginStroke(pt[0], pt[1], e.timeStamp);
       e.preventDefault();
     });
     canvas.addEventListener('pointermove', (e) => {
       this.cursor = toImage(e);
       if (!this.node || !this.node._pen) return;
       const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-      for (const ev of (evs.length ? evs : [e])) { const pt = toImage(ev); if (pt) this.node.extendStroke(pt[0], pt[1]); }
+      for (const ev of (evs.length ? evs : [e])) { const pt = toImage(ev); if (pt) this.node.extendStroke(pt[0], pt[1], ev.timeStamp); }
     });
     const end = () => { if (this.node) this.node.endStroke(); };
     canvas.addEventListener('pointerup', end);
@@ -608,8 +837,12 @@ const pane = {
     ui.title.textContent = (n.title || 'Drawing') + ' · ' + p.mode + (p.mode === 'animate' ? ' · ' + p.timing : '');
     ui.color.value = /^#[0-9a-f]{6}$/i.test(p.color) ? p.color : '#ffffff';
     ui.width.value = p.width; ui.soft.value = p.softness; ui.opac.value = p.opacity;
-    for (const k of ['width', 'softness', 'opacity', 'color']) {
-      const w = (n.widgets || []).find((x) => x.name === k); if (w) w.value = p[k];
+    const extra = ['brush', 'scatter', 'dotSize', 'density', 'hueJit', 'satJit', 'valJit', 'speedWidth', 'speedAmt'];
+    for (const k of extra) ui[k].value = p[k] ?? DEFAULTS[k];
+    for (const el of ui.scatterBits) el.style.opacity = p.brush === 'scatter' ? '1' : '0.35';
+    ui.speedAmt.parentNode.style.opacity = p.speedWidth === 'off' ? '0.35' : '1';
+    for (const k of ['width', 'softness', 'opacity', 'color'].concat(extra)) {
+      const w = (n.widgets || []).find((x) => x.name === label(k)); if (w) w.value = p[k];
     }
   },
 

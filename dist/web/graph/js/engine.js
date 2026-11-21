@@ -47,6 +47,7 @@ export class ShaderEngine {
       gray: this._solid([128, 128, 128, 255]),
       black: this._solid([0, 0, 0, 255]),
       white: this._solid([255, 255, 255, 255]),
+      transparent: this._solid([0, 0, 0, 0]),   // "nothing here" — for compositing inputs
     };
     this.fbo = gl.createFramebuffer();
     this.fboTex = null; this.fboSize = '';
@@ -131,6 +132,21 @@ export class ShaderEngine {
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     this._setSampling(gl.TEXTURE_2D);
     this.texCache.set(img, t);
+    return t;
+  }
+
+  // Re-upload a canvas the page keeps redrawing (the Graph View node's schematic).
+  // Same texture object every time, like texFromVideo.
+  texFromCanvas(canvas) {
+    const gl = this.gl;
+    if (!canvas || !canvas.width || !canvas.height) return this.solid.transparent;
+    let t = this.texCache.get(canvas);
+    if (!t) { t = gl.createTexture(); this.texCache.set(canvas, t); }
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvas);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    this._setSampling(gl.TEXTURE_2D);
     return t;
   }
 
