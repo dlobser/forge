@@ -56,10 +56,55 @@ export async function loadMathDefs() {
   return defs;
 }
 
+// ── mute (bypass) ───────────────────────────────────────────────────────────────
+// A muted node doesn't run at all — no render, no GPU cost — and passes its input
+// straight through instead: each output takes the input of the same type in the
+// same position (a Blend's `out` gets A; a muted Multiply passes its first number
+// on). An output with no matching input (a source, a synth) goes empty unless the
+// node offers a `mutedOutput(slot)`. The mode is litegraph's own `node.mode`, so it
+// saves with the graph; 4 is the value ComfyUI uses for bypass, and litegraph's
+// "Never" (2) is treated the same so its built-in Mode menu agrees.
+export const MUTED = 4;
+export const isMuted = (n) => !!n && (n.mode === MUTED || n.mode === 2);
+
+function bypass(n) {
+  const ins = n.inputs || [], outs = n.outputs || [];
+  const seen = {};
+  outs.forEach((o, i) => {
+    const k = seen[o.type] = (seen[o.type] || 0) + 1;      // this is the k-th output of its type
+    const same = [];
+    ins.forEach((s, j) => { if (s.type === o.type) same.push(j); });
+    let v;
+    if (same.length) v = n.getInputData(same[Math.min(k, same.length) - 1]);
+    else if (n.mutedOutput) v = n.mutedOutput(i);
+    n.setOutputData(i, v);
+  });
+}
+
 // one topological evaluation pass over the graph
 export function evalOnce() {
   const order = RT.graph.computeExecutionOrder(false, false);
   for (const n of order) {
+    const muted = isMuted(n);
+    if (muted !== !!n._muted) {
+      n._muted = muted;
+      if (n.onMuteChange) { try { n.onMuteChange(muted); } catch (e) {} }
+      if (!muted) n._dirty = true;          // re-render on the way back in
+    }
+    if (muted) { try { bypass(n); } catch (e) {} continue; }
+    // An input that now comes from a different node — a link moved, or an upstream
+    // node was muted and its input passed through — must re-render this one even if
+    // the two images happen to share a version number. Nodes only compared versions,
+    // so that change used to go unnoticed.
+    const ins = n.inputs;
+    if (ins && ins.length) {
+      const seen = n._inSeen || (n._inSeen = []);
+      for (let i = 0; i < ins.length; i++) {
+        const d = ins[i].link != null ? n.getInputData(i) : undefined;
+        const o = d && typeof d === 'object' ? d : null;
+        if (seen[i] !== o) { seen[i] = o; n._dirty = true; }
+      }
+    }
     if (n.evaluate) { try { n.evaluate(RT); } catch (e) { console.error('node error', n.title, e); } }
     // bundled litegraph nodes use onExecute() rather than Forge's evaluate(RT)
     else if (n.onExecute) { try { n.onExecute(); } catch (e) {} }

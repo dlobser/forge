@@ -51,11 +51,24 @@ export const api = {
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   },
+  // the sequence's soundtrack (a WAV rendered in the browser), muxed in by videoMake
+  async seqAudio(project, name, blob) {
+    const fd = new FormData();
+    fd.append('file', blob, 'audio.wav'); fd.append('project', project); fd.append('name', name);
+    const r = await fetch('/api/sequence/audio', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  },
   seqClear: (project, name) => j('POST', '/api/sequence/clear', { project, name }),
   sequences: (project) => j('GET', `/api/sequences?project=${encodeURIComponent(project)}`),
-  videoCommand: (project, name, fps) =>
-    j('GET', `/api/video/command?project=${encodeURIComponent(project)}&name=${encodeURIComponent(name)}${fps ? `&fps=${fps}` : ''}`),
-  videoMake: (project, name, fps) => j('POST', '/api/video/make', { project, name, fps }),
+  // opts (all optional): { quality, codec, chroma, audio, keep_wav } — see video.py
+  videoCommand: (project, name, fps, opts) => {
+    const q = new URLSearchParams({ project, name });
+    if (fps) q.set('fps', fps);
+    for (const [k, v] of Object.entries(opts || {})) if (v !== undefined && v !== null) q.set(k, String(v));
+    return j('GET', '/api/video/command?' + q.toString());
+  },
+  videoMake: (project, name, fps, opts) => j('POST', '/api/video/make', Object.assign({ project, name, fps }, opts || {})),
 
   // AI workflows
   workflows: () => j('GET', '/api/workflows'),

@@ -15,6 +15,8 @@ import {
 import { askText } from './ui.js';
 import { openHelp } from './help.js';
 import { openCloudDialog, cloudSummary, onCloudChange, mountCloudIndicator } from './cloudai.js';
+import { startLoop, editorVisible } from './loop.js';
+import { installMute } from './mute.js';
 
 const LG = window.LiteGraph;
 const $ = (id) => document.getElementById(id);
@@ -138,6 +140,7 @@ function resizeCanvas(canvas) {
   const canvas = $('graphcanvas');
   RT.graphcanvas = new window.LGraphCanvas(canvas, RT.graph);
   RT.graphcanvas.background_image = null;
+  installMute();                 // Ctrl+M / right-click ▸ Mute: a node becomes a pass-through
   RT.graph.onAfterChange = () => requestSave();
   RT.graph.onNodeAdded = () => requestSave();
   RT.graph.onNodeRemoved = () => requestSave();
@@ -227,6 +230,9 @@ function resizeCanvas(canvas) {
   // node finishing a load), and node previews come from a cached bitmap. Anything
   // that needs continuous painting while paused — the fullscreen viewer — registers
   // a hook instead.
+  //
+  // startLoop keeps this running when the editor window is covered — e.g. by a
+  // Viewer Window taken fullscreen on the same display (see loop.js).
   let lastT = performance.now();
   function frame() {
     const now = performance.now();
@@ -237,8 +243,7 @@ function resizeCanvas(canvas) {
       evalOnce();
     }
     RT.runHooks();
-    try { RT.graphcanvas.draw(RT.playing || RT.capturing, false); } catch (e) {}
-    requestAnimationFrame(frame);
+    if (editorVisible()) { try { RT.graphcanvas.draw(RT.playing || RT.capturing, false); } catch (e) {} }
   }
-  requestAnimationFrame(frame);
+  startLoop(frame);
 })();
