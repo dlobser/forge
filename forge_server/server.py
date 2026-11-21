@@ -323,6 +323,14 @@ async def api_seq_frame(file: UploadFile = File(...), project: str = Form(None),
     return {"ok": True, "frame": fn}
 
 
+@app.post("/api/sequence/audio")
+async def api_seq_audio(file: UploadFile = File(...), project: str = Form(None),
+                        name: str = Form("sequence")):
+    data = await file.read()
+    path = video.save_audio(_settings, project or current_project(), name, data)
+    return {"ok": True, "audio": path}
+
+
 class SeqReq(BaseModel):
     project: Optional[str] = None
     name: str
@@ -343,17 +351,32 @@ class VideoReq(BaseModel):
     project: Optional[str] = None
     name: str
     fps: Optional[int] = None
+    # encode options from the graph's Sequence node; all absent = the settings template
+    quality: Optional[str] = None      # draft | standard | high | max
+    codec: Optional[str] = None        # h264 | h265 | prores | prores4444
+    chroma: Optional[str] = None       # 420 | 444
+    audio: Optional[bool] = None       # mux sequences/<name>/audio.wav into the video
+    keep_wav: Optional[bool] = None    # also copy it next to the video
+
+
+def _video_opts(quality, codec, chroma, audio, keep_wav) -> dict:
+    return {"quality": quality, "codec": codec, "chroma": chroma,
+            "audio": bool(audio), "keep_wav": bool(keep_wav)}
 
 
 @app.get("/api/video/command")
 def api_video_command(project: Optional[str] = None, name: str = Query(...),
-                      fps: Optional[int] = None):
-    return video.resolve_command(_settings, project or current_project(), name, fps)
+                      fps: Optional[int] = None, quality: Optional[str] = None,
+                      codec: Optional[str] = None, chroma: Optional[str] = None,
+                      audio: Optional[bool] = None, keep_wav: Optional[bool] = None):
+    return video.resolve_command(_settings, project or current_project(), name, fps,
+                                 _video_opts(quality, codec, chroma, audio, keep_wav))
 
 
 @app.post("/api/video/make")
 def api_video_make(req: VideoReq):
-    return video.make_video(_settings, req.project or current_project(), req.name, req.fps)
+    return video.make_video(_settings, req.project or current_project(), req.name, req.fps,
+                            _video_opts(req.quality, req.codec, req.chroma, req.audio, req.keep_wav))
 
 
 # ── AI workflows ─────────────────────────────────────────────────────────────

@@ -8,6 +8,9 @@ import { loadImage } from './engine.js';
 import { downloadTexture, openLiveView } from './liveview.js';
 import { addShaderWidgets, addSingleShaderWidget, addAiWidgets, syncShaderWidgets, markDirty, openTextEditor } from './widgets.js';
 import { registerDrawingNode } from './drawing.js';
+import { registerGraphViewNode } from './graphview.js';
+import { registerCurveNode } from './curve.js';
+import { registerAudioNodes, audioRec, graphHasAudio } from './audio.js';
 import { siteURL } from './boot.js';
 import { cloud, cloudDepth, cloudGenerate, askForKey, openCloudDialog, onCloudChange, elapsed } from './cloudai.js';
 
@@ -141,6 +144,7 @@ function registerBuiltins() {
 //   uZoom  scales the source about the pan point; >1 moves in closer
 //   uOffX/uOffY  pan, in fractions of the output frame (0 = centred)
 //   uEdgeMode  what to show outside the image: 0 black · 1 clamp/smear · 2 wrap · 3 mirror
+//              · 4 transparent (black with zero alpha, so it composites as nothing)
 const CP_VERT = `#version 300 es
 precision highp float; out vec2 vUv;
 void main(){ vec2 p=vec2(float((gl_VertexID<<1)&2),float(gl_VertexID&2)); vUv=p; gl_Position=vec4(p*2.0-1.0,0.0,1.0); }`;
@@ -153,7 +157,7 @@ uniform float uInW, uInH, uMode, uZoom, uOffX, uOffY, uRotate, uEdgeMode, uFlipX
 // false when the sample should read as empty (black).
 bool edge(inout vec2 uv){
   if (all(greaterThanEqual(uv, vec2(0.0))) && all(lessThanEqual(uv, vec2(1.0)))) return true;
-  if (uEdgeMode < 0.5) return false;
+  if (uEdgeMode < 0.5 || uEdgeMode > 3.5) return false;
   if (uEdgeMode < 1.5) { uv = clamp(uv, 0.0, 1.0); return true; }
   if (uEdgeMode < 2.5) { uv = fract(uv); return true; }
   uv = abs(fract(uv * 0.5 + 0.5) * 2.0 - 1.0); return true;
@@ -178,7 +182,7 @@ void main(){
   vec2 uv = 0.5 + (p / max(uZoom, 1e-4) - vec2(uOffX, uOffY)) * frac;
   if (uFlipX > 0.5) uv.x = 1.0 - uv.x;
   if (uFlipY > 0.5) uv.y = 1.0 - uv.y;
-  if (!edge(uv)) { o = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  if (!edge(uv)) { o = vec4(0.0, 0.0, 0.0, uEdgeMode > 3.5 ? 0.0 : 1.0); return; }
   o = texture(uColor, uv);
 }`;
 const CP_CONTROLS = [
@@ -188,7 +192,7 @@ const CP_CONTROLS = [
   { uniform: 'uFlipX', value: 0 }, { uniform: 'uFlipY', value: 0 },
 ];
 const FIT_MODES = { stretch: 0, crop: 1, letterbox: 2 };
-const EDGE_MODES = { black: 0, clamp: 1, wrap: 2, mirror: 3 };
+const EDGE_MODES = { black: 0, clamp: 1, wrap: 2, mirror: 3, transparent: 4 };
 
 const galleryValues = () => RT.gallery.map((i) => i.filename);
 const setWidget = (node, name, value) => { const w = (node.widgets || []).find((x) => x.name === name); if (w) w.value = value; };
@@ -333,6 +337,29 @@ function openFull(node) {
     const s = imageSize(node._out);
     return { tex, width: s.width, height: s.height };
   });
+}
+
+// The right-click "Render size" item, for nodes outside the shader factory.
+function renderSizeMenu(node) {
+  const current = node._size || nodeRenderSize(node);
+  return [{
+    content: 'Render size: ' + current.width + ' × ' + current.height,
+    has_submenu: true,
+    callback: function (_v, _opts, e, menu) {
+      new LG.ContextMenu(['follow input', '512 × 512', '1024 × 1024', '1920 × 1080', '1080 × 1920', '2048 × 2048', '3840 × 2160', 'custom…'], {
+        event: e, parentMenu: menu, callback: function (val) {
+          if (val === 'follow input') { delete node.properties.renderWidth; delete node.properties.renderHeight; }
+          else {
+            let m = String(val).match(/(\d+)\s*[×x]\s*(\d+)/i);
+            if (String(val).startsWith('custom')) m = String(prompt('Render size (width x height):', current.width + 'x' + current.height) || '').match(/(\d+)\s*[×x]\s*(\d+)/i);
+            if (!m || +m[1] < 64 || +m[2] < 64) return;
+            node.properties.renderWidth = +m[1]; node.properties.renderHeight = +m[2];
+          }
+          node._dirty = true; RT.requestSave(); RT.redraw();
+        },
+      });
+    },
+  }];
 }
 
 // ── Source ──────────────────────────────────────────────────────────────────────
@@ -661,7 +688,7 @@ function CropScaleNode() {
   this.addWidget('slider', 'offset x', p.offX, (v) => { p.offX = v; mark(); }, { min: -1, max: 1, step: 0.002 });
   this.addWidget('slider', 'offset y', p.offY, (v) => { p.offY = v; mark(); }, { min: -1, max: 1, step: 0.002 });
   this.addWidget('slider', 'rotate', p.rotate, (v) => { p.rotate = v; mark(); }, { min: -180, max: 180, step: 0.5 });
-  this.addWidget('combo', 'edges', p.edge, (v) => { p.edge = v; mark(); }, { values: ['black', 'clamp', 'wrap', 'mirror'] });
+  this.addWidget('combo', 'edges', p.edge, (v) => { p.edge = v; mark(); }, { values: Object.keys(EDGE_MODES) });
   this.addWidget('button', 'reset framing', null, () => {
     p.zoom = 1; p.offX = 0; p.offY = 0; p.rotate = 0;
     setWidget(this, 'zoom', 1); setWidget(this, 'offset x', 0);
@@ -800,7 +827,7 @@ function togglePin(node, c) {
     node.addInput(c.label, 'number');
     node.inputs[node.inputs.length - 1]._ctrlUniform = c.uniform;
   }
-  sizeWithThumb(node);
+  if (node._resize) node._resize(); else sizeWithThumb(node);
   markDirty(node);
 }
 
@@ -1716,6 +1743,9 @@ ViewerWindowNode.prototype._open = function () {
   if (!w) { RT.toast('Popup blocked — allow popups for Forge', 'bad'); return; }
   w.document.open(); w.document.write(VIEWER_WIN_HTML); w.document.close();
   this._win = w;
+  // Let this window's own vsync drive the graph when it goes fullscreen and covers
+  // the editor — otherwise the editor's rAF stops and so does the picture (loop.js).
+  if (RT.addFrameWindow) RT.addFrameWindow(w);
   this._canvas = w.document.getElementById('v');
   this._ctx = this._canvas && this._canvas.getContext('2d');
   this._status = '● window open'; this._statusColor = '#37d0a0'; RT.redraw();
@@ -1777,12 +1807,32 @@ SaveNode.prototype.onConfigure = function () { setWidget(this, 'name', this.prop
 // ── Sequence → Video ───────────────────────────────────────────────────────────
 // `length` = 'drawing clip' takes the frame count from the Drawing nodes in the graph
 // (the longest clip × fps), so an export is exactly one loop of the drawing.
-// `export` picks what's kept: the PNG frames, the encoded mp4, or both.
+// `export` picks what's kept: the PNG frames, the encoded video, or both.
 // `start` = 'where it is' records from the graph's current state and time — the
 // frame on screen is frame 0 — while 'reset first' reseeds every simulation, trail,
 // particle system and drawing clip and starts the clock at 0.
+//
+// Desktop (ffmpeg) only — the web build encodes in the browser, see below:
+//
+// Video: `quality` sets the encoder effort/compression (the old default was a
+// medium-effort CRF 17 4:2:0 encode with no colour tags, which smeared saturated
+// colour and shifted it slightly in players); `format` picks the codec; `colour`
+// 4:4:4 keeps full colour resolution for crisp coloured edges, at the cost of
+// playing in fewer players. Every encode is tagged BT.709 so colours match.
+//
+// Audio: with an Audio Out in the graph, `audio` records it. The sound is rendered
+// offline from the same frames (see audio.js), so it's in sync however slowly the
+// frames render, then muxed into the video and/or written as a .wav — with frames
+// only, the .wav lands in the sequence folder next to them.
 const SEQ_START = ['where it is', 'reset first'];
-const SEQ_DEFAULTS = { name: 'graph_seq', fps: 24, frames: 48, length: 'frames', start: SEQ_START[0], export: 'frames + video' };
+const SEQ_QUALITY = ['draft', 'standard', 'high', 'max'];
+const SEQ_FORMATS = { 'mp4 · H.264': 'h264', 'mp4 · H.265 10-bit': 'h265', 'mov · ProRes 422 HQ': 'prores', 'mov · ProRes 4444 (alpha)': 'prores4444' };
+const SEQ_CHROMA = ['4:2:0 (plays anywhere)', '4:4:4 (sharp colour)'];
+const SEQ_AUDIO = ['in video', 'in video + .wav', '.wav only', 'off'];
+const SEQ_DEFAULTS = {
+  name: 'graph_seq', fps: 24, frames: 48, length: 'frames', start: SEQ_START[0], export: 'frames + video',
+  quality: 'high', format: 'mp4 · H.264', chroma: SEQ_CHROMA[0], audio: SEQ_AUDIO[0],
+};
 // The web build has no server and no ffmpeg (window.ForgeStore is its browser-local
 // backend), so there the same three `export` values download an mp4 and/or a zip of
 // PNGs instead (videoexport.js). The combo shows what you'll get; the stored value is
@@ -1795,19 +1845,27 @@ const seqExportLabel = (v) => (SEQ_EXPORTS.find((e) => e[0] === v) || SEQ_EXPORT
 function SequenceNode() {
   this.addInput('image', IMG);
   this.properties = Object.assign({}, SEQ_DEFAULTS, SEQ_WEB ? { export: 'video' } : {});
-  this.addWidget('text', 'name', this.properties.name, (v) => { this.properties.name = (v || '').trim() || 'graph_seq'; RT.requestSave(); });
-  this.addWidget('number', 'fps', this.properties.fps, (v) => { this.properties.fps = Math.round(v); RT.requestSave(); }, { min: 1, max: 60, step: 1 });
-  this.addWidget('combo', 'length', this.properties.length, (v) => { this.properties.length = v; RT.requestSave(); }, { values: ['frames', 'drawing clip'] });
-  this.addWidget('number', 'frames', this.properties.frames, (v) => { this.properties.frames = Math.round(v); RT.requestSave(); }, { min: 1, max: 3600, step: 1 });
-  this.addWidget('combo', 'start', this.properties.start, (v) => { this.properties.start = v; RT.requestSave(); }, { values: SEQ_START });
-  this.addWidget('combo', 'export', seqExportLabel(this.properties.export), (label) => {
+  const p = this.properties;
+  const set = (k) => (v) => { p[k] = v; RT.requestSave(); };
+  this.addWidget('text', 'name', p.name, (v) => { p.name = (v || '').trim() || 'graph_seq'; RT.requestSave(); });
+  this.addWidget('number', 'fps', p.fps, (v) => { p.fps = Math.round(v); RT.requestSave(); }, { min: 1, max: 120, step: 1 });
+  this.addWidget('combo', 'length', p.length, set('length'), { values: ['frames', 'drawing clip'] });
+  this.addWidget('number', 'frames', p.frames, (v) => { p.frames = Math.round(v); RT.requestSave(); }, { min: 1, max: 36000, step: 1 });
+  this.addWidget('combo', 'start', p.start, set('start'), { values: SEQ_START });
+  this.addWidget('combo', 'export', seqExportLabel(p.export), (label) => {
     const e = SEQ_EXPORTS.find((x) => x[1] === label);
-    if (e) { this.properties.export = e[0]; RT.requestSave(); }
+    if (e) { p.export = e[0]; RT.requestSave(); }
   }, { values: SEQ_EXPORTS.map((e) => e[1]) });
+  if (!SEQ_WEB) {
+    this.addWidget('combo', 'quality', p.quality, set('quality'), { values: SEQ_QUALITY });
+    this.addWidget('combo', 'format', p.format, set('format'), { values: Object.keys(SEQ_FORMATS) });
+    this.addWidget('combo', 'colour', p.chroma, set('chroma'), { values: SEQ_CHROMA });
+    this.addWidget('combo', 'audio', p.audio, set('audio'), { values: SEQ_AUDIO });
+  }
   this.addWidget('button', '● Render', null, () => this._render());
   // the web build encodes as it renders; there is no folder of frames to come back to
   if (!SEQ_WEB) this.addWidget('button', 'Make video from frames', null, () => this._video());
-  this.size = this.computeSize(); this.size[0] = Math.max(230, this.size[0]); this.size[1] += 16;
+  this.size = this.computeSize(); this.size[0] = Math.max(250, this.size[0]); this.size[1] += 16;
 }
 SequenceNode.title = 'Sequence → Video';
 SequenceNode.prototype._frameCount = function () {
@@ -1817,6 +1875,17 @@ SequenceNode.prototype._frameCount = function () {
     if (clips.length) return Math.max(1, Math.round(Math.max(...clips) * fps));
   }
   return Math.max(1, this.properties.frames | 0);
+};
+// what the server's encoder needs to know
+SequenceNode.prototype._videoOpts = function () {
+  const p = this.properties, a = p.audio || 'off';
+  return {
+    quality: p.quality || 'high',
+    codec: SEQ_FORMATS[p.format] || 'h264',
+    chroma: String(p.chroma || '').startsWith('4:4:4') ? '444' : '420',
+    audio: a === 'in video' || a === 'in video + .wav',
+    keep_wav: a === 'in video + .wav' || a === '.wav only',
+  };
 };
 SequenceNode.prototype._render = async function () {
   const probe = this.getInputData(0);
@@ -1829,6 +1898,8 @@ SequenceNode.prototype._render = async function () {
   const mode = this.properties.export || 'frames + video';
   // web build: frames go straight to an in-browser encoder / zip, downloaded at the end
   const out = SEQ_WEB ? new (await import('./videoexport.js')).SequenceExport({ name, fps, mode }) : null;
+  // desktop: the graph's sound is rendered offline alongside the frames
+  const recAudio = !out && this.properties.audio !== 'off' && graphHasAudio(RT.graph);
   RT.capturing = true;          // the rAF loop yields; we own time + eval here
   try {
     if (fresh) {
@@ -1838,6 +1909,7 @@ SequenceNode.prototype._render = async function () {
       for (const node of RT.graph._nodes || []) if (node.resetClip) node.resetClip();
     }
     if (!out) await RT.api.seqClear(RT.project, name);
+    if (recAudio) audioRec.begin(fps, fresh);
     for (let i = 0; i < n; i++) {
       RT.time = t0 + i / fps;                   // advance time so animated shaders move
       RT.dt = 1 / fps;
@@ -1845,6 +1917,7 @@ SequenceNode.prototype._render = async function () {
       // without stepping anything. Every later frame steps sims / particles / clips
       // once — and so does every frame of a fresh start.
       RT.advance = fresh || i > 0;
+      audioRec.setFrame(i);
       RT.evalOnce();                            // re-render every node at this time
       const h = this.getInputData(0);
       const s = imageSize(h);
@@ -1857,20 +1930,28 @@ SequenceNode.prototype._render = async function () {
       }
       this._status = `frame ${i + 1}/${n}`; RT.redraw();
     }
-    this._status = `rendered ${n} frames`;
+    let gotAudio = false;
+    if (recAudio) {
+      this._status = 'rendering audio…'; RT.redraw();
+      const wav = await audioRec.finish(n / fps);
+      if (wav) { await RT.api.seqAudio(RT.project, name, wav); gotAudio = true; }
+    }
+    this._status = `rendered ${n} frames` + (gotAudio ? ' + audio' : '');
     RT.capturing = false;
     if (out) {
       this._status = mode === 'frames' ? 'zipping…' : 'encoding…'; RT.redraw();
       const file = await out.finish();
       this._status = 'downloaded ' + file;
       RT.toast('Downloaded ' + file, 'good');
-    } else if (mode === 'frames') { await RT.api.videoCommand(RT.project, name, fps); RT.toast(`Rendered ${n} frames`, 'good'); }
-    else {
+    } else if (mode === 'frames') {
+      await RT.api.videoCommand(RT.project, name, fps, this._videoOpts());
+      RT.toast(`Rendered ${n} frames` + (gotAudio ? ' + audio.wav' : ''), 'good');
+    } else {
       this._status = 'encoding…'; RT.redraw();
       const ok = await this._video();
       // video only: the frames were just the encoder's input
       if (ok && mode === 'video') await RT.api.seqClear(RT.project, name);
-      this._status = ok ? (mode === 'video' ? 'video done' : `${n} frames + video`) : 'ffmpeg failed';
+      this._status = ok ? (mode === 'video' ? 'video done' : `${n} frames + video`) + (gotAudio ? ' + audio' : '') : 'ffmpeg failed';
     }
     RT.redraw();
   } catch (e) {
@@ -1878,6 +1959,7 @@ SequenceNode.prototype._render = async function () {
     RT.toast('Sequence failed: ' + e.message, 'bad');
   }
   finally {
+    audioRec.cancel();
     RT.capturing = false;
     // carry on from the last recorded frame, so the live graph doesn't jump back
     RT.time = fresh ? savedTime : t0 + (n - 1) / fps;
@@ -1885,17 +1967,21 @@ SequenceNode.prototype._render = async function () {
 };
 SequenceNode.prototype._video = async function () {
   try {
-    const res = await RT.api.videoMake(RT.project, this.properties.name, this.properties.fps);
-    RT.toast(res.ok ? 'Video: ' + res.out : 'ffmpeg failed (see log)', res.ok ? 'good' : 'bad');
-    if (!res.ok) console.warn(res.log);
+    const res = await RT.api.videoMake(RT.project, this.properties.name, this.properties.fps, this._videoOpts());
+    RT.toast(res.ok ? 'Video: ' + res.out + (res.wav ? ' (+ ' + res.wav.split(/[\\/]/).pop() + ')' : '') : 'ffmpeg failed (see console)', res.ok ? 'good' : 'bad');
+    if (!res.ok) console.warn(res.command + '\n' + res.log);
     return !!res.ok;
   } catch (e) { RT.toast('Video failed: ' + e.message, 'bad'); return false; }
 };
 SequenceNode.prototype.evaluate = function () {};
 SequenceNode.prototype.onConfigure = function () {
   for (const k in SEQ_DEFAULTS) if (this.properties[k] === undefined) this.properties[k] = SEQ_DEFAULTS[k];
-  for (const k of ['name', 'fps', 'length', 'frames', 'start']) setWidget(this, k, this.properties[k]);
+  for (const k of ['name', 'fps', 'length', 'frames', 'start', 'quality', 'format', 'audio']) setWidget(this, k, this.properties[k]);
   setWidget(this, 'export', seqExportLabel(this.properties.export));
+  setWidget(this, 'colour', this.properties.chroma);
+  // nodes saved before the quality / audio widgets existed are too short for them
+  const min = this.computeSize()[1] + 16;
+  if (this.size[1] < min) this.size[1] = min;
 };
 // the node face shows progress / the result
 SequenceNode.prototype.onDrawForeground = function (ctx) {
@@ -2158,7 +2244,15 @@ export function registerNodes() {
   LG.registerNodeType(T.SAVE, SaveNode);
   LG.registerNodeType(T.SEQUENCE, SequenceNode);
   LG.registerNodeType(T.PASS_THROUGH, PassThroughNode);
-  registerDrawingNode({ THUMB_H, attachThumb, sizeWithThumb, ensureOut, nodeRenderSize });
+  // helpers the node modules in their own files share with the ones here
+  const H = {
+    THUMB_H, attachThumb, sizeWithThumb, ensureOut, nodeRenderSize, openFull, renderSizeMenu,
+    addShaderWidgets, syncShaderWidgets, pinnableControls, restorePins, applyPins, togglePin, pinMenuItem,
+  };
+  registerDrawingNode(H);
+  registerGraphViewNode(H);
+  registerCurveNode(H);
+  registerAudioNodes(H);
   for (const def of RT.shaderDefs) {
         if (def.pipeline) {
             makePipelineNode(def);

@@ -239,6 +239,57 @@ time: frame 0 is the frame on screen, and simulations, particles, trails and
 drawing clips carry on from there, as does the clock afterwards. *reset first*
 reseeds all of those and starts the clock at 0.
 
+The graph's Sequence node builds its own ffmpeg command (`video.build_command`)
+instead of using the settings template: `quality` (draft / standard / high / max →
+x264/x265 preset + CRF), `format` (H.264 mp4, H.265 10-bit mp4, ProRes 422 HQ or
+ProRes 4444 with alpha), and `colour` (4:2:0 for compatibility, 4:4:4 for crisp
+coloured edges). Every encode converts with the BT.709 matrix and is tagged BT.709,
+so colours don't shift in players. `audio` records the graph's sound (see below)
+into the video, as a `.wav` beside it, or both; with frames-only export the WAV is
+left as `sequences/<name>/audio.wav`.
+
+## Audio
+
+`audio.js`. AUDIO pins carry a live Web Audio connection, not a value: a node's
+output is a handle on its unit, and a node with an AUDIO input connects the
+upstream unit into itself the frame it sees a new handle. **Sine** is one oscillator
+and a volume; with nothing connected to its output it plays straight to the speakers.
+**Synth** (waveform incl.
+white/pink/brown noise, pitch as a MIDI note, volume, pan, tone, detune, shimmer,
+glide, attack/release, an On gate) → **Chorus / Echo / Reverb / Filter / Drive** →
+**Audio Out** (four inputs, a meter, a soft limiter on the master). Every knob can be
+swapped for a number pin, so the same Curve or Oscillator that moves the picture
+plays the sound. The browser only starts audio after a click or key press.
+
+Each ear's detuned / shimmer voice is a quieter partner (3:1) of a main voice that is
+identical in both ears. Equal-level detuned voices — or the main voice split between
+the ears, which speakers sum in the room — cancel to silence once per beat and are
+heard as a pop every second; at 3:1 a beat is at most a ~6 dB swell.
+
+A Sequence render steps time far slower than real time, so live audio can't just be
+recorded. Instead each audio node logs its settings per frame, and afterwards the
+same units are rebuilt in an `OfflineAudioContext`, the settings replayed at the
+frames' exact times, and the result rendered and uploaded as `audio.wav` — in sync
+however long the frames took. The speakers are muted during the render.
+
+## Curve, Graph View, mute, background running
+
+- **Curve** (`curve.js`, control/curve) — a −1…1 spline on a 0…1 timeline played
+  every `period` seconds (loop / ping-pong / once). Keys are smooth (Catmull-Rom),
+  bezier (draggable handles), linear or hold. Double-click for the editor; a number
+  into `phase` scrubs it instead of the clock.
+- **Graph View** (`graphview.js`, input/graph_view) — the graph drawn as light
+  outlines (boxes, links, labels, the selection brighter, muted nodes dashed) on
+  transparent, or over its `image` input. `frame: editor view` follows the editor's
+  pan/zoom. Redrawn only when something it shows changes.
+- **Mute** — Ctrl+M / Ctrl+B or right-click. A muted node (`node.mode` 4, litegraph's
+  "Never" counts too) doesn't run; `boot.js` passes each output the input of the
+  same type, so it behaves as a bypass. The evaluator also re-renders a node whenever
+  an input's upstream changes identity, not just its version.
+- **Background running** — `loop.js` drives the frame loop from the editor's rAF, then
+  from an open Viewer Window's rAF if the editor stops painting (covered by that
+  window in fullscreen), then from a worker heartbeat if nothing is visible.
+
 ## Ports & conventions
 
 - Forge 8191, ComfyUI 8188. Sibling Zoom uses 8189/8190/8200 — no collision.
